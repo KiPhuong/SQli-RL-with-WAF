@@ -1,0 +1,78 @@
+# Configuration file for SQL Injection RL Framework
+
+# Agent configuration
+agent:
+  learning_rate: 0.001
+  memory_size: 10000
+  batch_size: 32
+  epsilon_start: 1.0
+  epsilon_end: 0.1
+  epsilon_decay: 0.995
+  target_update_frequency: 100
+  network_type: "dqn"  # Options: dqn, dueling_dqn, attention_dqn
+  hidden_sizes: [256, 128, 64]
+  
+# Environment configuration
+environment:
+  target_url: "http://testphp.vulnweb.com"
+  max_steps_per_episode: 100
+  timeout: 10
+  success_threshold: 0.8
+  
+# Training configuration
+training:
+  episodes: 1000
+  save_frequency: 100
+  eval_frequency: 50
+  early_stopping_patience: 200
+  model_save_path: "models/trained_model.pth"
+  
+# Testing configuration
+testing:
+  episodes: 50
+  model_path: "models/trained_model.pth"
+  
+# Logging configuration
+logging:
+  log_dir: "logs"
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  max_file_size: 10485760  # 10MB
+  backup_count: 5
+  cleanup_days: 30
+  
+# Network configuration
+network:
+  timeout: 10
+  max_retries: 3
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  proxy_url: null  # Set if using proxy
+  
+# WAF configuration
+waf:
+  detection_enabled: true
+  bypass_enabled: true
+  max_bypass_attempts: 5
+  confidence_threshold: 0.7
+  
+# Payload configuration
+payloads:
+  catalog_file: "data/payload_catalog.json"
+  max_payload_length: 1000
+  encoding_methods: ["url", "html", "unicode", "base64"]
+  obfuscation_enabled: true
+  
+# Guidelines configuration
+guidelines:
+  catalog_file: "data/pentest_catalog.json"
+  frameworks: ["owasp", "ptes"]
+  compliance_check: true
+  
+# Reward system configuration
+rewards:
+  injection_success: 100.0
+  waf_bypass: 50.0
+  error_detection: 20.0
+  response_analysis: 10.0
+  failed_attempt: -5.0
+  timeout_penalty: -10.0
+  blocked_penalty: -15.0
