@@ -1,0 +1,134 @@
+# SQL Keywords and Operators for RL Agent Action Space
+# Basic SQL Keywords
+SELECT
+FROM
+WHERE
+AND
+OR
+UNION
+INSERT
+UPDATE
+DELETE
+DROP
+CREATE
+ALTER
+TABLE
+DATABASE
+SCHEMA
+INDEX
+VIEW
+PROCEDURE
+FUNCTION
+TRIGGER
+
+# SQL Operators
+=
+!=
+<>
+<
+>
+<=
+>=
+LIKE
+IN
+NOT
+EXISTS
+BETWEEN
+IS
+NULL
+
+# SQL Injection Specific
+'
+"
+--
+/*
+*/
+#
+;
+(
+)
+,
+.
++
+-
+*
+/
+%
+
+# Common Values
+1
+0
+TRUE
+FALSE
+NULL
+
+# Time-based Functions
+SLEEP
+WAITFOR
+DELAY
+BENCHMARK
+
+# Error-based Functions
+EXTRACTVALUE
+UPDATEXML
+XMLTYPE
+CAST
+CONVERT
+CHAR
+ASCII
+HEX
+CONCAT
+SUBSTRING
+
+# Union-based
+ALL
+DISTINCT
+ORDER
+BY
+GROUP
+HAVING
+LIMIT
+OFFSET
+
+# Boolean-based
+REGEXP
+RLIKE
+SOUNDS
+MATCH
+AGAINST
+BINARY
+COLLATE
+
+# Conditional
+IF
+CASE
+WHEN
+THEN
+ELSE
+END
+
+# Database Functions
+VERSION
+USER
+CURRENT_USER
+SESSION_USER
+SYSTEM_USER
+DATABASE
+SCHEMA_NAME
+TABLE_NAME
+COLUMN_NAME
+
+# Special Characters
+SPACE
+TAB
+NEWLINE
+RETURN
+
+# Encoding Indicators
+PERCENT
+UNDERSCORE
+BACKSLASH
+
+# Control Tokens
+PAD
+END_TOKEN

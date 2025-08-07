@@ -1,538 +1,323 @@
 """
-Main application file for SQL Injection RL with WAF bypass framework.
-This file orchestrates the entire training and testing pipeline.
+Main Training Loop for SQL Injection RL Agent
+Orchestrates the training process with DQN and Boltzmann exploration
 """
 
-import argparse
-import os
-import sys
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
 import json
-from typing import Dict, Any, Optional
-import yaml
+import os
+from datetime import datetime
+from typing import Dict, List, Any
 
-# Add src to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
-
-from src.agent.rl_agent import RLAgent
-from src.agent.action_space import ActionSpace
-from src.environment.pentest_env import PentestEnvironment
-from src.environment.state_manager import StateManager
-from src.environment.reward_calculator import RewardCalculator
-from src.waf.waf_detector import WAFDetector
-from src.waf.bypass_methods import BypassMethods
-from src.payloads.payload_generator import PayloadGenerator
-from src.payloads.payload_catalog import PayloadCatalog
-from src.guidelines.catalog_parser import CatalogParser
-from src.guidelines.rule_engine import RuleEngine
-from src.utils.logging_utils import setup_logging, get_logger
-from src.utils.network_utils import NetworkUtils
+from agent import SQLiRLAgent
+from env import SQLiEnvironment
+from gen_action import GenAction
+from bypass_waf import BypassWAF
 
 
-class SQLiRLFramework:
-    """
-    Main framework class that orchestrates the SQL injection RL system.
-    """
+class SQLiRLTrainer:
+    """Main trainer class for SQL injection RL agent"""
     
-    def __init__(self, config_path: str = 'config.yaml'):
-        """
-        Initialize the framework.
+    def __init__(self, config: Dict[str, Any] = None):
+        # Default configuration
+        default_config = {
+            'target_url': 'http://localhost:8080/vuln',
+            'parameter': 'id',
+            'method': 'GET',
+            'max_steps_per_episode': 50,
+            'num_episodes': 1000,
+            'learning_rate': 0.001,
+            'gamma': 0.99,
+            'memory_size': 10000,
+            'batch_size': 32,
+            'target_update_freq': 100,
+            'initial_temperature': 2.0,
+            'min_temperature': 0.1,
+            'temperature_decay': 0.995,
+            'save_frequency': 100,
+            'log_frequency': 10,
+            'model_save_path': 'models/',
+            'log_save_path': 'logs/'
+        }
         
-        Args:
-            config_path: Path to configuration file
-        """
-        self.config = self._load_config(config_path)
-        self.logger = setup_logging(
-            log_dir=self.config.get('logging', {}).get('log_dir', 'logs'),
-            log_level=self.config.get('logging', {}).get('level', 'INFO')
+        self.config = {**default_config, **(config or {})}
+        
+        # Create directories
+        os.makedirs(self.config['model_save_path'], exist_ok=True)
+        os.makedirs(self.config['log_save_path'], exist_ok=True)
+        
+        # Initialize environment
+        self.env = SQLiEnvironment(
+            target_url=self.config['target_url'],
+            parameter=self.config['parameter'],
+            method=self.config['method'],
+            max_steps=self.config['max_steps_per_episode']
         )
         
-        # Initialize components
-        self.action_space = ActionSpace()
-        self.network_utils = NetworkUtils(
-            timeout=self.config.get('network', {}).get('timeout', 10),
-            max_retries=self.config.get('network', {}).get('max_retries', 3)
-        )
+        # Initialize agent
+        state_size = self.env.get_state_size()
+        action_size = self.env.get_action_size()
         
-        # Initialize WAF and payload components
-        self.waf_detector = WAFDetector()
-        self.bypass_methods = BypassMethods()
-        self.payload_generator = PayloadGenerator(
-            self.action_space, 
-            self.bypass_methods
-        )
-        self.payload_catalog = PayloadCatalog()
+        agent_config = {
+            'learning_rate': self.config['learning_rate'],
+            'gamma': self.config['gamma'],
+            'memory_size': self.config['memory_size'],
+            'batch_size': self.config['batch_size'],
+            'target_update_freq': self.config['target_update_freq'],
+            'initial_temperature': self.config['initial_temperature'],
+            'min_temperature': self.config['min_temperature'],
+            'temperature_decay': self.config['temperature_decay']
+        }
         
-        # Initialize environment components
-        self.state_manager = StateManager()
-        self.reward_calculator = RewardCalculator()
+        self.agent = SQLiRLAgent(state_size, action_size, agent_config)
         
-        # Initialize guidelines and rules
-        self.catalog_parser = CatalogParser()
-        self.rule_engine = RuleEngine()
+        # Training metrics
+        self.episode_rewards = []
+        self.episode_lengths = []
+        self.success_episodes = []
+        self.exploration_temps = []
         
-        # Initialize environment and agent
-        env_config = self.config.get('environment', {})
-        self.environment = PentestEnvironment(
-            target_url=env_config.get('target_url', 'http://testphp.vulnweb.com'),
-            state_manager=self.state_manager,
-            reward_calculator=self.reward_calculator,
-            waf_detector=self.waf_detector,
-            payload_generator=self.payload_generator,
-            network_utils=self.network_utils
-        )
-        
-        agent_config = self.config.get('agent', {})
-        self.agent = RLAgent(
-            state_size=self.state_manager.get_state_size(),
-            action_size=self.action_space.get_action_count(),
-            learning_rate=agent_config.get('learning_rate', 0.001),
-            memory_size=agent_config.get('memory_size', 10000),
-            batch_size=agent_config.get('batch_size', 32)
-        )
-        
-        self.logger.main_logger.info("Framework initialized successfully")
+        print(f"Initialized SQLi RL Trainer")
+        print(f"State size: {state_size}")
+        print(f"Action size: {action_size}")
+        print(f"Target URL: {self.config['target_url']}")
     
-    def _load_config(self, config_path: str) -> Dict[str, Any]:
-        """
-        Load configuration from file.
+    def train(self):
+        """Main training loop"""
+        print(f"\nStarting training for {self.config['num_episodes']} episodes...")
         
-        Args:
-            config_path: Path to configuration file
-            
-        Returns:
-            Configuration dictionary
-        """
-        if not os.path.exists(config_path):
-            # Return default configuration
-            return {
-                'agent': {
-                    'learning_rate': 0.001,
-                    'memory_size': 10000,
-                    'batch_size': 32,
-                    'epsilon_start': 1.0,
-                    'epsilon_end': 0.1,
-                    'epsilon_decay': 0.995,
-                    'target_update_frequency': 100
-                },
-                'environment': {
-                    'target_url': 'http://testphp.vulnweb.com',
-                    'max_steps_per_episode': 100,
-                    'timeout': 10
-                },
-                'training': {
-                    'episodes': 1000,
-                    'save_frequency': 100,
-                    'eval_frequency': 50,
-                    'early_stopping_patience': 200
-                },
-                'logging': {
-                    'log_dir': 'logs',
-                    'level': 'INFO'
-                },
-                'network': {
-                    'timeout': 10,
-                    'max_retries': 3
-                }
-            }
-        
-        try:
-            with open(config_path, 'r') as f:
-                if config_path.endswith('.yaml') or config_path.endswith('.yml'):
-                    return yaml.safe_load(f)
-                else:
-                    return json.load(f)
-        except Exception as e:
-            print(f"Error loading config: {e}")
-            return {}
-    
-    def train(self, episodes: int = None, save_model_path: str = None):
-        """
-        Train the RL agent.
-        
-        Args:
-            episodes: Number of episodes to train (overrides config)
-            save_model_path: Path to save trained model
-        """
-        training_config = self.config.get('training', {})
-        episodes = episodes or training_config.get('episodes', 1000)
-        save_frequency = training_config.get('save_frequency', 100)
-        eval_frequency = training_config.get('eval_frequency', 50)
-        
-        self.logger.main_logger.info(f"Starting training for {episodes} episodes")
-        
-        # Training statistics
-        episode_rewards = []
-        episode_steps = []
-        success_count = 0
         best_reward = float('-inf')
         
-        for episode in range(episodes):
-            # Reset environment
-            state = self.environment.reset()
-            total_reward = 0
-            steps = 0
-            done = False
+        for episode in range(self.config['num_episodes']):
+            episode_reward, episode_length, episode_success = self._run_episode(episode)
             
-            while not done:
-                # Agent selects action
-                action = self.agent.act(state)
-                
-                # Take action in environment
-                next_state, reward, done, info = self.environment.step(action)
-                
-                # Store experience
-                self.agent.remember(state, action, reward, next_state, done)
-                
-                # Update state and tracking
-                state = next_state
-                total_reward += reward
-                steps += 1
-                
-                # Train agent if enough experiences
-                if len(self.agent.memory) > self.agent.batch_size:
-                    self.agent.replay()
+            # Store metrics
+            self.episode_rewards.append(episode_reward)
+            self.episode_lengths.append(episode_length)
+            self.success_episodes.append(episode_success)
+            self.exploration_temps.append(self.agent.exploration.temperature)
             
-            # Episode completed
-            episode_rewards.append(total_reward)
-            episode_steps.append(steps)
-            
-            # Check for success
-            if info.get('injection_found', False):
-                success_count += 1
-            
-            # Log episode completion
-            exploration_rate = getattr(self.agent, 'epsilon', 0.0)
-            self.logger.log_training_episode(
-                episode + 1, total_reward, steps, 
-                info.get('injection_found', False), exploration_rate
-            )
-            
-            # Update target network
-            if episode % self.agent.target_update_frequency == 0:
-                self.agent.update_target_network()
-            
-            # Evaluate and save model
-            if (episode + 1) % eval_frequency == 0:
-                avg_reward = sum(episode_rewards[-eval_frequency:]) / eval_frequency
-                success_rate = success_count / (episode + 1)
+            # Log progress
+            if episode % self.config['log_frequency'] == 0:
+                avg_reward = np.mean(self.episode_rewards[-100:])
+                success_rate = np.mean(self.success_episodes[-100:])
                 
-                self.logger.main_logger.info(
-                    f"Episode {episode + 1}: Avg Reward={avg_reward:.2f}, "
-                    f"Success Rate={success_rate:.2%}"
-                )
-                
-                # Save best model
-                if avg_reward > best_reward:
-                    best_reward = avg_reward
-                    if save_model_path:
-                        self.agent.save_model(save_model_path.replace('.pth', '_best.pth'))
+                print(f"Episode {episode:4d} | "
+                      f"Reward: {episode_reward:6.2f} | "
+                      f"Avg Reward: {avg_reward:6.2f} | "
+                      f"Success Rate: {success_rate:5.2%} | "
+                      f"Temperature: {self.agent.exploration.temperature:.3f} | "
+                      f"Steps: {episode_length}")
             
             # Save model periodically
-            if (episode + 1) % save_frequency == 0 and save_model_path:
-                self.agent.save_model(save_model_path.replace('.pth', f'_episode_{episode + 1}.pth'))
+            if episode % self.config['save_frequency'] == 0 and episode > 0:
+                if episode_reward > best_reward:
+                    best_reward = episode_reward
+                    model_path = os.path.join(self.config['model_save_path'], 
+                                            f'best_model_episode_{episode}.pth')
+                    self.agent.save_model(model_path)
+                    print(f"Saved best model with reward {episode_reward:.2f}")
         
         # Save final model
-        if save_model_path:
-            self.agent.save_model(save_model_path)
+        final_model_path = os.path.join(self.config['model_save_path'], 'final_model.pth')
+        self.agent.save_model(final_model_path)
         
-        # Training summary
-        avg_reward = sum(episode_rewards) / len(episode_rewards)
-        success_rate = success_count / episodes
+        # Save training logs
+        self._save_training_logs()
         
-        self.logger.main_logger.info(
-            f"Training completed! Average Reward: {avg_reward:.2f}, "
-            f"Success Rate: {success_rate:.2%}"
-        )
+        # Plot results
+        self._plot_training_results()
         
-        return {
-            'avg_reward': avg_reward,
-            'success_rate': success_rate,
-            'episode_rewards': episode_rewards,
-            'episode_steps': episode_steps
-        }
+        print("\nTraining completed!")
     
-    def test(self, model_path: str = None, episodes: int = 10):
-        """
-        Test the trained agent.
+    def _run_episode(self, episode_num: int) -> tuple:
+        """Run a single episode"""
+        state = self.env.reset()
+        total_reward = 0
+        step_count = 0
+        episode_success = False
         
-        Args:
-            model_path: Path to trained model
-            episodes: Number of test episodes
+        while True:
+            # Agent selects action
+            action = self.agent.select_token(state)
             
-        Returns:
-            Test results
-        """
-        if model_path and os.path.exists(model_path):
-            self.agent.load_model(model_path)
-            self.logger.main_logger.info(f"Loaded model from {model_path}")
-        else:
-            self.logger.main_logger.warning("No model path provided or file not found")
+            # Environment step
+            next_state, reward, done, info = self.env.step(action)
+            
+            # Store experience
+            self.agent.remember(state, action, reward, next_state, done)
+            
+            # Train agent
+            if len(self.agent.memory) > self.agent.config['batch_size']:
+                self.agent.replay()
+            
+            # Update for next iteration
+            state = next_state
+            total_reward += reward
+            step_count += 1
+            
+            # Check for success
+            if info.get('sqli_detected', False):
+                episode_success = True
+            
+            if done:
+                break
+        
+        return total_reward, step_count, episode_success
+    
+    def _save_training_logs(self):
+        """Save training metrics to file"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = os.path.join(self.config['log_save_path'], f'training_log_{timestamp}.json')
+        
+        log_data = {
+            'config': self.config,
+            'episode_rewards': self.episode_rewards,
+            'episode_lengths': self.episode_lengths,
+            'success_episodes': self.success_episodes,
+            'exploration_temps': self.exploration_temps,
+            'final_stats': {
+                'total_episodes': len(self.episode_rewards),
+                'average_reward': np.mean(self.episode_rewards),
+                'success_rate': np.mean(self.success_episodes),
+                'final_temperature': self.exploration_temps[-1] if self.exploration_temps else 0
+            }
+        }
+        
+        with open(log_file, 'w') as f:
+            json.dump(log_data, f, indent=2)
+        
+        print(f"Training logs saved to {log_file}")
+
+    def _plot_training_results(self):
+        """Plot training results"""
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
+
+        # Episode rewards
+        ax1.plot(self.episode_rewards, alpha=0.6)
+        ax1.plot(self._moving_average(self.episode_rewards, 100), 'r-', linewidth=2)
+        ax1.set_title('Episode Rewards')
+        ax1.set_xlabel('Episode')
+        ax1.set_ylabel('Reward')
+        ax1.grid(True)
+
+        # Success rate
+        success_ma = self._moving_average([float(x) for x in self.success_episodes], 100)
+        ax2.plot(success_ma, 'g-', linewidth=2)
+        ax2.set_title('Success Rate (100-episode moving average)')
+        ax2.set_xlabel('Episode')
+        ax2.set_ylabel('Success Rate')
+        ax2.grid(True)
+
+        # Episode lengths
+        ax3.plot(self.episode_lengths, alpha=0.6)
+        ax3.plot(self._moving_average(self.episode_lengths, 100), 'b-', linewidth=2)
+        ax3.set_title('Episode Lengths')
+        ax3.set_xlabel('Episode')
+        ax3.set_ylabel('Steps')
+        ax3.grid(True)
+
+        # Exploration temperature
+        ax4.plot(self.exploration_temps, 'orange', linewidth=2)
+        ax4.set_title('Exploration Temperature')
+        ax4.set_xlabel('Episode')
+        ax4.set_ylabel('Temperature')
+        ax4.grid(True)
+
+        plt.tight_layout()
+
+        # Save plot
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        plot_file = os.path.join(self.config['log_save_path'], f'training_results_{timestamp}.png')
+        plt.savefig(plot_file, dpi=300, bbox_inches='tight')
+        plt.show()
+
+        print(f"Training plots saved to {plot_file}")
+
+    def _moving_average(self, data: List[float], window: int) -> List[float]:
+        """Calculate moving average"""
+        if len(data) < window:
+            return data
+
+        moving_avg = []
+        for i in range(len(data)):
+            start_idx = max(0, i - window + 1)
+            moving_avg.append(np.mean(data[start_idx:i+1]))
+
+        return moving_avg
+
+    def test_agent(self, model_path: str, num_episodes: int = 10):
+        """Test trained agent"""
+        print(f"\nTesting agent for {num_episodes} episodes...")
+        
+        # Load model
+        self.agent.load_model(model_path)
         
         # Disable exploration for testing
-        original_epsilon = getattr(self.agent, 'epsilon', 0.0)
-        if hasattr(self.agent, 'epsilon'):
-            self.agent.epsilon = 0.0
+        original_temp = self.agent.exploration.temperature
+        self.agent.exploration.temperature = self.agent.exploration.min_temperature
         
-        self.logger.main_logger.info(f"Starting testing for {episodes} episodes")
+        test_rewards = []
+        test_successes = []
         
-        test_results = {
-            'episodes': episodes,
-            'total_rewards': [],
-            'steps_taken': [],
-            'injections_found': 0,
-            'waf_bypasses': 0,
-            'successful_episodes': 0
-        }
-        
-        for episode in range(episodes):
-            state = self.environment.reset()
+        for episode in range(num_episodes):
+            state = self.env.reset()
             total_reward = 0
-            steps = 0
-            done = False
+            episode_success = False
             
-            while not done:
-                action = self.agent.act(state)
-                next_state, reward, done, info = self.environment.step(action)
+            while True:
+                action = self.agent.select_token(state)
+                next_state, reward, done, info = self.env.step(action)
                 
                 state = next_state
                 total_reward += reward
-                steps += 1
-            
-            # Record results
-            test_results['total_rewards'].append(total_reward)
-            test_results['steps_taken'].append(steps)
-            
-            if info.get('injection_found', False):
-                test_results['injections_found'] += 1
-                test_results['successful_episodes'] += 1
-            
-            if info.get('waf_bypassed', False):
-                test_results['waf_bypasses'] += 1
-            
-            self.logger.main_logger.info(
-                f"Test Episode {episode + 1}: Reward={total_reward:.2f}, "
-                f"Steps={steps}, Success={info.get('injection_found', False)}"
-            )
-        
-        # Calculate statistics
-        test_results['avg_reward'] = sum(test_results['total_rewards']) / episodes
-        test_results['avg_steps'] = sum(test_results['steps_taken']) / episodes
-        test_results['success_rate'] = test_results['successful_episodes'] / episodes
-        test_results['injection_rate'] = test_results['injections_found'] / episodes
-        test_results['bypass_rate'] = test_results['waf_bypasses'] / episodes
-        
-        # Restore original epsilon
-        if hasattr(self.agent, 'epsilon'):
-            self.agent.epsilon = original_epsilon
-        
-        self.logger.main_logger.info(
-            f"Testing completed! Success Rate: {test_results['success_rate']:.2%}, "
-            f"Avg Reward: {test_results['avg_reward']:.2f}"
-        )
-        
-        return test_results
-    
-    def interactive_mode(self, model_path: str = None):
-        """
-        Run framework in interactive mode for manual testing.
-        
-        Args:
-            model_path: Path to trained model
-        """
-        if model_path and os.path.exists(model_path):
-            self.agent.load_model(model_path)
-            self.logger.main_logger.info(f"Loaded model from {model_path}")
-        
-        print("=== SQL Injection RL Framework - Interactive Mode ===")
-        print("Commands:")
-        print("  test <url> - Test a specific URL")
-        print("  payload <payload> - Test a specific payload")
-        print("  waf <url> - Detect WAF on URL")
-        print("  stats - Show framework statistics")
-        print("  quit - Exit interactive mode")
-        print()
-        
-        while True:
-            try:
-                command = input("SQli-RL> ").strip().split()
                 
-                if not command:
-                    continue
+                if info.get('sqli_detected', False):
+                    episode_success = True
                 
-                if command[0] == 'quit':
+                if done:
                     break
-                
-                elif command[0] == 'test' and len(command) > 1:
-                    url = command[1]
-                    self._interactive_test_url(url)
-                
-                elif command[0] == 'payload' and len(command) > 1:
-                    payload = ' '.join(command[1:])
-                    self._interactive_test_payload(payload)
-                
-                elif command[0] == 'waf' and len(command) > 1:
-                    url = command[1]
-                    self._interactive_detect_waf(url)
-                
-                elif command[0] == 'stats':
-                    self._interactive_show_stats()
-                
-                else:
-                    print("Unknown command or missing arguments")
             
-            except KeyboardInterrupt:
-                print("\nExiting...")
-                break
-            except Exception as e:
-                print(f"Error: {e}")
-    
-    def _interactive_test_url(self, url: str):
-        """Test a URL in interactive mode."""
-        print(f"Testing URL: {url}")
-        
-        # Update environment target
-        self.environment.target_url = url
-        
-        # Run a single episode
-        state = self.environment.reset()
-        actions_taken = []
-        done = False
-        step = 0
-        
-        while not done and step < 20:  # Limit steps in interactive mode
-            action = self.agent.act(state)
-            next_state, reward, done, info = self.environment.step(action)
+            test_rewards.append(total_reward)
+            test_successes.append(episode_success)
             
-            action_name = self.action_space.get_action_name(action)
-            actions_taken.append((action, action_name, reward))
-            
-            print(f"  Step {step + 1}: {action_name} (reward: {reward:.2f})")
-            
-            state = next_state
-            step += 1
+            print(f"Test Episode {episode+1}: Reward={total_reward:.2f}, "
+                  f"Success={'Yes' if episode_success else 'No'}")
         
-        # Show results
-        if info.get('injection_found'):
-            print(f"✓ SQL Injection found! Type: {info.get('injection_type', 'Unknown')}")
-        else:
-            print("✗ No SQL injection found")
+        # Restore original temperature
+        self.agent.exploration.temperature = original_temp
         
-        if info.get('waf_detected'):
-            print(f"⚠ WAF detected: {info.get('waf_type', 'Unknown')}")
-    
-    def _interactive_test_payload(self, payload: str):
-        """Test a specific payload in interactive mode."""
-        print(f"Testing payload: {payload}")
-        
-        # Send direct request
-        response = self.network_utils.send_request(
-            self.environment.target_url,
-            method='GET',
-            params={'id': payload}
-        )
-        
-        # Analyze response
-        analysis = self.state_manager.analyze_response(response)
-        
-        print(f"Status Code: {response.get('status_code')}")
-        print(f"Response Time: {response.get('response_time', 0):.2f}s")
-        print(f"Content Length: {response.get('content_length', 0)} bytes")
-        
-        if analysis.get('sql_error_detected'):
-            print("✓ SQL error detected in response")
-        
-        if analysis.get('waf_blocked'):
-            print("⚠ Request appears to be blocked by WAF")
-    
-    def _interactive_detect_waf(self, url: str):
-        """Detect WAF on a URL in interactive mode."""
-        print(f"Detecting WAF on: {url}")
-        
-        waf_info = self.waf_detector.detect_waf(url)
-        
-        if waf_info['detected']:
-            print(f"✓ WAF detected: {waf_info['type']}")
-            print(f"  Confidence: {waf_info['confidence']:.2f}")
-            print(f"  Detection method: {waf_info['detection_method']}")
-        else:
-            print("✗ No WAF detected")
-    
-    def _interactive_show_stats(self):
-        """Show framework statistics in interactive mode."""
-        print("=== Framework Statistics ===")
-        
-        # Agent statistics
-        if hasattr(self.agent, 'memory'):
-            print(f"Agent memory size: {len(self.agent.memory)}")
-        
-        # Payload statistics
-        catalog_stats = self.payload_catalog.get_statistics()
-        print(f"Payload catalog: {catalog_stats.get('total_payloads', 0)} payloads")
-        
-        # Network statistics
-        network_stats = self.network_utils.get_request_statistics()
-        print(f"Requests sent: {network_stats.get('total_requests', 0)}")
-        
-        # Log statistics
-        log_stats = self.logger.get_log_statistics()
-        print(f"Log files: {len(log_stats.get('log_files', {}))}")
+        print(f"\nTest Results:")
+        print(f"Average Reward: {np.mean(test_rewards):.2f}")
+        print(f"Success Rate: {np.mean(test_successes):.2%}")
 
 
 def main():
-    """Main entry point for the application."""
-    parser = argparse.ArgumentParser(description='SQL Injection RL with WAF bypass framework')
-    parser.add_argument('mode', choices=['train', 'test', 'interactive'], 
-                       help='Operation mode')
-    parser.add_argument('--config', default='config.yaml', 
-                       help='Configuration file path')
-    parser.add_argument('--model', help='Model file path')
-    parser.add_argument('--episodes', type=int, help='Number of episodes')
-    parser.add_argument('--target', help='Target URL for testing')
-    parser.add_argument('--save-model', help='Path to save trained model')
+    """Main function"""
+    # Configuration
+    config = {
+        'target_url': 'https://www.zixem.altervista.org/SQLi/level1.php?id=1',  # Change this to your target
+        'parameter': 'id',
+        'method': 'GET',
+        'num_episodes': 1000,
+        'max_steps_per_episode': 50,
+        'learning_rate': 0.001,
+        'initial_temperature': 2.0,
+        'save_frequency': 100,
+        'log_frequency': 10
+    }
     
-    args = parser.parse_args()
+    # Create trainer
+    trainer = SQLiRLTrainer(config)
     
-    try:
-        # Initialize framework
-        framework = SQLiRLFramework(args.config)
-        
-        if args.target:
-            framework.environment.target_url = args.target
-        
-        if args.mode == 'train':
-            framework.train(
-                episodes=args.episodes,
-                save_model_path=args.save_model or 'models/trained_model.pth'
-            )
-        
-        elif args.mode == 'test':
-            if not args.model:
-                print("Error: Model path required for testing mode")
-                return 1
-            
-            results = framework.test(
-                model_path=args.model,
-                episodes=args.episodes or 10
-            )
-            
-            print("\n=== Test Results ===")
-            print(f"Success Rate: {results['success_rate']:.2%}")
-            print(f"Average Reward: {results['avg_reward']:.2f}")
-            print(f"Injections Found: {results['injections_found']}")
-            print(f"WAF Bypasses: {results['waf_bypasses']}")
-        
-        elif args.mode == 'interactive':
-            framework.interactive_mode(args.model)
-        
-        return 0
-        
-    except KeyboardInterrupt:
-        print("\nOperation cancelled by user")
-        return 0
-    except Exception as e:
-        print(f"Error: {e}")
-        return 1
+    # Train agent
+    trainer.train()
+    
+    # Test agent (optional)
+    # trainer.test_agent('models/final_model.pth', num_episodes=5)
 
 
-if __name__ == '__main__':
-    sys.exit(main())
+if __name__ == "__main__":
+    main()
