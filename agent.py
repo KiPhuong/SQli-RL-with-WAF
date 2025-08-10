@@ -83,19 +83,22 @@ class SQLiRLAgent:
     def __init__(self, state_size: int, action_size: int, config: Dict[str, Any] = None):
         self.state_size = state_size
         self.action_size = action_size
-        
-        # Default configuration
+
+        # Default configuration with dynamic sizing
         default_config = {
             'learning_rate': 0.001,
             'gamma': 0.99,
             'memory_size': 10000,
             'batch_size': 32,
             'target_update_freq': 100,
-            'hidden_sizes': [512, 256, 128],
+            'hidden_sizes': self._calculate_hidden_sizes(state_size, action_size),
             'initial_temperature': 2.0,
             'min_temperature': 0.1,
             'temperature_decay': 0.995
         }
+
+        print(f"🧠 Neural Network Architecture:")
+        print(f"   Input: {state_size} → Hidden: {default_config['hidden_sizes']} → Output: {action_size}")
         
         self.config = {**default_config, **(config or {})}
         
@@ -117,6 +120,22 @@ class SQLiRLAgent:
         
         # Copy weights to target network
         self.update_target_network()
+
+    def _calculate_hidden_sizes(self, state_size: int, action_size: int) -> List[int]:
+        """Calculate optimal hidden layer sizes based on input/output dimensions"""
+        # Rule of thumb: hidden layers should be between input and output size
+        max_hidden = max(state_size, action_size)
+        min_hidden = min(state_size, action_size)
+
+        if action_size <= 100:
+            # Small action space
+            return [512, 256, 128]
+        elif action_size <= 500:
+            # Medium action space
+            return [1024, 512, 256]
+        else:
+            # Large action space
+            return [2048, 1024, 512]
     
     def select_token(self, state: np.ndarray) -> int:
         """Select next token using Q-network and Boltzmann exploration"""
@@ -124,7 +143,7 @@ class SQLiRLAgent:
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
             q_values = self.q_network(state_tensor).cpu().numpy()[0]
-        
+
         # Select action using Boltzmann exploration
         action = self.exploration.select_action(q_values)
         return action

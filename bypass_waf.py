@@ -63,12 +63,58 @@ class BypassWAF:
         """Check if token is likely to be blocked"""
         return token.upper() in self.blocked_keywords
     
+    def apply_bypass_to_token(self, token: str, method: str = None, **kwargs) -> Dict[str, Any]:
+        """
+        Apply bypass technique to a single token.
+
+        Args:
+            token: Single token to bypass
+            method: Bypass method to use (random if None)
+
+        Returns:
+            Dictionary with bypass result
+        """
+        if method is None:
+            # Randomly select a method suitable for single tokens
+            token_methods = ['case_variation', 'comment_insertion', 'url_encoding',
+                           'hex_encoding', 'unicode_encoding']
+            method = random.choice(token_methods)
+
+        original_token = token
+
+        if method in self.bypass_methods:
+            try:
+                bypassed_token = self.bypass_methods[method](token, **kwargs)
+                return {
+                    'original': original_token,
+                    'bypassed': bypassed_token,
+                    'method': method,
+                    'success': True,
+                    'error': None
+                }
+            except Exception as e:
+                return {
+                    'original': original_token,
+                    'bypassed': original_token,
+                    'method': method,
+                    'success': False,
+                    'error': str(e)
+                }
+        else:
+            return {
+                'original': original_token,
+                'bypassed': original_token,
+                'method': method,
+                'success': False,
+                'error': f"Unknown bypass method: {method}"
+            }
+
     def apply_bypass(self, payload: str, method: str = None, **kwargs) -> str:
-        """Apply bypass technique to payload"""
+        """Apply bypass technique to payload (legacy method)"""
         if method is None:
             # Randomly select a method
             method = random.choice(list(self.bypass_methods.keys()))
-        
+
         if method in self.bypass_methods:
             try:
                 return self.bypass_methods[method](payload, **kwargs)

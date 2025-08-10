@@ -25,6 +25,7 @@ class SQLiRLTrainer:
         default_config = {
             'target_url': 'http://localhost:8080/vuln',
             'parameter': 'id',
+            'injection_point': '1',  # Base value to inject after
             'method': 'GET',
             'max_steps_per_episode': 50,
             'num_episodes': 1000,
@@ -35,11 +36,13 @@ class SQLiRLTrainer:
             'target_update_freq': 100,
             'initial_temperature': 2.0,
             'min_temperature': 0.1,
-            'temperature_decay': 0.995,
+            'temperature_decay': 0.99,
             'save_frequency': 100,
             'log_frequency': 10,
             'model_save_path': 'models/',
-            'log_save_path': 'logs/'
+            'log_save_path': 'logs/',
+            'debug_mode': True,  # Enable debug output
+            'debug_frequency': 1  # Debug every N steps
         }
         
         self.config = {**default_config, **(config or {})}
@@ -53,22 +56,26 @@ class SQLiRLTrainer:
             target_url=self.config['target_url'],
             parameter=self.config['parameter'],
             method=self.config['method'],
+            injection_point=self.config.get('injection_point', '1'),
             max_steps=self.config['max_steps_per_episode']
         )
         
-        # Initialize agent
+        # Initialize agent with dynamic sizing
         state_size = self.env.get_state_size()
         action_size = self.env.get_action_size()
-        
+
+        # Adjust training parameters based on action space size
+        adjusted_config = self._adjust_config_for_action_space(action_size)
+
         agent_config = {
-            'learning_rate': self.config['learning_rate'],
+            'learning_rate': adjusted_config['learning_rate'],
             'gamma': self.config['gamma'],
-            'memory_size': self.config['memory_size'],
-            'batch_size': self.config['batch_size'],
+            'memory_size': adjusted_config['memory_size'],
+            'batch_size': adjusted_config['batch_size'],
             'target_update_freq': self.config['target_update_freq'],
-            'initial_temperature': self.config['initial_temperature'],
+            'initial_temperature': adjusted_config['initial_temperature'],
             'min_temperature': self.config['min_temperature'],
-            'temperature_decay': self.config['temperature_decay']
+            'temperature_decay': adjusted_config['temperature_decay']
         }
         
         self.agent = SQLiRLAgent(state_size, action_size, agent_config)
@@ -79,10 +86,27 @@ class SQLiRLTrainer:
         self.success_episodes = []
         self.exploration_temps = []
         
-        print(f"Initialized SQLi RL Trainer")
-        print(f"State size: {state_size}")
-        print(f"Action size: {action_size}")
-        print(f"Target URL: {self.config['target_url']}")
+        print(f"🚀 Initialized SQLi RL Trainer")
+        print(f"📊 State size: {state_size}")
+        print(f"🎯 Action size: {action_size}")
+        print(f"🌐 Target URL: {self.config['target_url']}")
+        print(f"🔧 Debug mode: {'✅ ON' if self.config['debug_mode'] else '❌ OFF'}")
+
+        if self.config['debug_mode']:
+            print(f"\n🔍 DEBUG CONFIGURATION:")
+            print(f"  • Debug frequency: Every {self.config['debug_frequency']} step(s)")
+            print(f"  • Max steps per episode: {self.config['max_steps_per_episode']}")
+            print(f"  • Log frequency: Every {self.config['log_frequency']} episode(s)")
+
+            # Show some sample tokens
+            sample_tokens = self.env.gen_action.action_space.get_all_tokens()[:10]
+            print(f"  • Sample tokens: {sample_tokens}")
+            print(f"  • Total vocabulary size: {len(self.env.gen_action.action_space.get_all_tokens())}")
+
+            # Show baseline info
+            if self.env.baseline_response:
+                print(f"  • Baseline status: {self.env.baseline_response['status_code']}")
+                print(f"  • Baseline length: {self.env.baseline_response['content_length']} chars")
     
     def train(self):
         """Main training loop"""
@@ -138,33 +162,157 @@ class SQLiRLTrainer:
         total_reward = 0
         step_count = 0
         episode_success = False
-        
+
+        if self.config['debug_mode']:
+            print(f"\n{'='*60}")
+            print(f"🚀 EPISODE {episode_num} STARTED")
+            print(f"{'='*60}")
+            print(f"Initial state shape: {np.array(state).shape}")
+            print(f"Initial state (first 10 tokens): {state[:10]}")
+
         while True:
+            step_count += 1
+
             # Agent selects action
             action = self.agent.select_token(state)
-            
+
+            # Get Q-values for debugging
+            if self.config['debug_mode'] and step_count % self.config['debug_frequency'] == 0:
+                q_values = self.agent.get_q_values(state)
+                top_5_actions = np.argsort(q_values)[-5:][::-1]
+
+                print(f"\n🔍 STEP {step_count} DEBUG INFO:")
+                print(f"{'─'*50}")
+
+                # Show current state info
+                current_payload = self.env.current_payload
+
+                print(f"📊 Current State:")
+                print(f"  • State vector size: {len(state)}")
+                print(f"  • Current payload: '{current_payload}'")
+                print(f"  • Payload length: {len(current_payload)} chars")
+                print(f"  • State range: [{state.min():.3f}, {state.max():.3f}]")
+
+                # Show Q-values and action selection
+                print(f"🧠 Agent Decision:")
+                print(f"  • Selected action (token ID): {action}")
+                print(f"  • Selected token: '{self.env.gen_action.get_token_name(action)}'")
+                print(f"  • Q-value for selected action: {q_values[action]:.4f}")
+                print(f"  • Temperature: {self.agent.exploration.temperature:.4f}")
+
+                print(f"  • Top 5 Q-values:")
+                for i, act_id in enumerate(top_5_actions):
+                    token_name = self.env.gen_action.get_token_name(act_id)
+                    print(f"    {i+1}. Token '{token_name}' (ID:{act_id}) = {q_values[act_id]:.4f}")
+
             # Environment step
             next_state, reward, done, info = self.env.step(action)
-            
+
+            # Debug bypass processing results
+            if self.config['debug_mode'] and step_count % self.config['debug_frequency'] == 0:
+                print(f"🔧 Bypass Processing:")
+                print(f"  • Original token: '{info.get('original_token', 'N/A')}'")
+                print(f"  • Processed token: '{info.get('processed_token', 'N/A')}'")
+                print(f"  • Bypass applied: {info.get('bypass_applied', False)}")
+                if info.get('bypass_method'):
+                    print(f"  • Bypass method: {info['bypass_method']}")
+                    print(f"  • Bypass success: {info.get('bypass_success', 'N/A')}")
+
+            # Debug environment step results
+            if self.config['debug_mode'] and step_count % self.config['debug_frequency'] == 0:
+                print(f"🌐 Environment Response:")
+                print(f"  • Final URL: '{info.get('final_url', 'N/A')}'")
+                print(f"  • Final payload: '{info['payload']}'")
+                print(f"  • HTTP status: {info['response_status']}")
+                print(f"  • Response length: {info['response_length']} chars")
+                print(f"  • Response time: {info['response_time']:.3f}s")
+                print(f"  • WAF blocked: {info['is_blocked']}")
+                print(f"  • SQL error detected: {info['error_detected']}")
+                print(f"  • SQLi success detected: {info['sqli_detected']}")
+                print(f"  • Reward: {reward:.2f}")
+
+                # Enhanced error information display
+                if info['error_detected']:
+                    print(f"🔍 SQL Error Analysis:")
+                    print(f"  • Database type: {info.get('database_type', 'unknown')}")
+
+                    if info.get('extracted_columns'):
+                        print(f"  • Extracted columns: {info['extracted_columns']}")
+
+                    if info.get('extracted_tables'):
+                        print(f"  • Extracted tables: {info['extracted_tables']}")
+
+                    if info.get('error_messages'):
+                        print(f"  • Error messages: {info['error_messages'][:2]}")  # Show first 2 messages
+
+                    error_info = info.get('error_info', {})
+                    if error_info.get('detected_patterns'):
+                        print(f"  • Detected patterns: {error_info['detected_patterns'][:3]}")  # Show first 3 patterns
+
+                # Show response content preview if there's an error or success
+                if info['error_detected'] or info['sqli_detected'] or info['is_blocked']:
+                    print(f"  • Response preview: '{info.get('response_content_preview', 'N/A')}'")
+
+                # Show baseline comparison
+                if info.get('baseline_status') and info.get('baseline_length'):
+                    status_diff = info['response_status'] != info['baseline_status']
+                    length_diff = abs(info['response_length'] - info['baseline_length'])
+                    print(f"  • Baseline comparison:")
+                    print(f"    - Status changed: {'✅' if status_diff else '❌'} ({info['baseline_status']} → {info['response_status']})")
+                    print(f"    - Length diff: {length_diff} chars ({info['baseline_length']} → {info['response_length']})")
+
+                # Show simple state information
+                print(f"📈 State Update:")
+                print(f"  • State vector length: {len(next_state)}")
+                print(f"  • State features (first 10): {next_state[:10]}")
+                print(f"  • Updated payload: '{info['payload']}'")
+                print(f"  • Payload length: {len(info['payload'])} chars")
+                print(f"  • Episode done: {done}")
+
+                # Show state breakdown if debug
+                if hasattr(self.env, 'state_manager'):
+                    debug_info = self.env.state_manager.debug_state(next_state)
+                    print(f"  • Payload features: {list(debug_info['payload_features'].values())[:5]}...")
+                    print(f"  • Response features: {list(debug_info['response_features'].values())[:5]}...")
+                    print(f"  • WAF features: {list(debug_info['waf_features'].values())[:5]}...")
+
+                if done:
+                    print(f"🏁 Episode termination reason:")
+                    if info['sqli_detected']:
+                        print(f"  ✅ SQL injection success!")
+                    elif step_count >= self.config['max_steps_per_episode']:
+                        print(f"  ⏰ Maximum steps reached")
+                    elif info.get('is_complete', False):
+                        print(f"  🔚 END_TOKEN reached")
+                    elif info.get('is_full', False):
+                        print(f"  📦 State is full")
+
             # Store experience
             self.agent.remember(state, action, reward, next_state, done)
-            
+
             # Train agent
             if len(self.agent.memory) > self.agent.config['batch_size']:
                 self.agent.replay()
-            
+
             # Update for next iteration
             state = next_state
             total_reward += reward
-            step_count += 1
-            
+
             # Check for success
             if info.get('sqli_detected', False):
                 episode_success = True
-            
+
             if done:
                 break
-        
+
+        if self.config['debug_mode']:
+            print(f"\n🏆 EPISODE {episode_num} SUMMARY:")
+            print(f"  • Total steps: {step_count}")
+            print(f"  • Total reward: {total_reward:.2f}")
+            print(f"  • Success: {'✅ YES' if episode_success else '❌ NO'}")
+            print(f"  • Final payload: '{info.get('payload', '')}'")
+            print(f"{'='*60}")
+
         return total_reward, step_count, episode_success
     
     def _save_training_logs(self):
@@ -293,20 +441,64 @@ class SQLiRLTrainer:
         print(f"Average Reward: {np.mean(test_rewards):.2f}")
         print(f"Success Rate: {np.mean(test_successes):.2%}")
 
+    def _adjust_config_for_action_space(self, action_size: int) -> Dict[str, Any]:
+        """Adjust training configuration based on action space size"""
+        base_config = {
+            'learning_rate': self.config['learning_rate'],
+            'memory_size': self.config['memory_size'],
+            'batch_size': self.config['batch_size'],
+            'initial_temperature': self.config['initial_temperature'],
+            'temperature_decay': self.config['temperature_decay']
+        }
+
+        print(f"🔧 Adjusting config for action space size: {action_size}")
+
+        if action_size <= 100:
+            # Small action space - default settings
+            print("   → Using default settings (small action space)")
+            return base_config
+        elif action_size <= 500:
+            # Medium action space - need more exploration and memory
+            adjusted = {
+                **base_config,
+                'learning_rate': base_config['learning_rate'] * 0.8,
+                'memory_size': base_config['memory_size'] * 2,
+                'batch_size': min(base_config['batch_size'] * 2, 128),
+                'initial_temperature': base_config['initial_temperature'] * 1.5,
+                'temperature_decay': max(base_config['temperature_decay'] * 0.995, 0.985)
+            }
+            print("   → Adjusted for medium action space")
+            return adjusted
+        else:
+            # Large action space - significant adjustments
+            adjusted = {
+                **base_config,
+                'learning_rate': base_config['learning_rate'] * 0.5,
+                'memory_size': base_config['memory_size'] * 5,
+                'batch_size': min(base_config['batch_size'] * 4, 256),
+                'initial_temperature': base_config['initial_temperature'] * 2.0,
+                'temperature_decay': max(base_config['temperature_decay'] * 0.99, 0.98)
+            }
+            print("   → Adjusted for large action space")
+            return adjusted
+
 
 def main():
     """Main function"""
     # Configuration
     config = {
-        'target_url': 'https://www.zixem.altervista.org/SQLi/level1.php?id=1',  # Change this to your target
+        'target_url': 'https://www.zixem.altervista.org/SQLi/level1.php',  # Base URL without parameters
         'parameter': 'id',
+        'injection_point': '1',  # Will inject after id=1
         'method': 'GET',
-        'num_episodes': 1000,
-        'max_steps_per_episode': 50,
+        'num_episodes': 10,  # Reduced for debugging
+        'max_steps_per_episode': 20,  # Reduced for debugging
         'learning_rate': 0.001,
         'initial_temperature': 2.0,
-        'save_frequency': 100,
-        'log_frequency': 10
+        'save_frequency': 5,  # Save more frequently for debugging
+        'log_frequency': 1,   # Log every episode for debugging
+        'debug_mode': True,   # Enable debug output
+        'debug_frequency': 1  # Debug every step
     }
     
     # Create trainer
