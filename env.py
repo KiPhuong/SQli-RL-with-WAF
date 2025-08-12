@@ -6,7 +6,7 @@ Handles HTTP requests and reward calculation
 import requests
 import time
 import re
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Tuple, Any, Optional, Union
 from urllib.parse import urljoin, quote
 import numpy as np
 
@@ -18,20 +18,21 @@ from simple_state import SimpleStateManager
 class SQLiEnvironment:
     """SQL Injection testing environment for RL agent"""
     
-    def __init__(self, target_url: str = "http://localhost:8080/vuln", 
-                 parameter: str = "id", method: str = "GET", 
-                 injection_point: str = "1", max_steps: int = 50, timeout: int = 10):
-        
+    def __init__(self, target_url: str = "http://localhost:8080/vuln",
+                 parameter: str = "id", method: str = "GET",
+                 injection_point: str = "1", max_steps: int = 50, timeout: int = 10,
+                 blocked_keywords: Optional[Union[List[str], str]] = None):
+
         self.target_url = target_url
         self.parameter = parameter
         self.method = method.upper()
         self.injection_point = injection_point
         self.max_steps = max_steps
         self.timeout = timeout
-        
+
         # Initialize modules
         self.gen_action = GenAction()
-        self.bypass_waf = BypassWAF()
+        self.bypass_waf = BypassWAF(blocked_keywords=blocked_keywords)
         self.state_manager = SimpleStateManager()
 
         # Environment state

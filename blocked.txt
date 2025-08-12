@@ -1,0 +1,38 @@
+# Example blocked keywords file
+# Lines starting with # are comments and will be ignored
+# Empty lines are also ignored
+
+# Basic SQL keywords
+SELECT
+UNION
+INSERT
+UPDATE
+DELETE
+DROP
+
+# Advanced SQL keywords
+CREATE
+ALTER
+TRUNCATE
+GRANT
+REVOKE
+
+# Execution keywords
+EXEC
+EXECUTE
+CALL
+
+# XSS keywords
+SCRIPT
+ALERT
+ONLOAD
+ONERROR
+
+# Multiple keywords per line (comma separated)
+CONCAT, SUBSTRING, LENGTH
+
+# Multiple keywords per line (space separated)
+CHAR ASCII HEX
+
+# Database specific
+MYSQL_VERSION SQLITE_VERSION POSTGRESQL_VERSION

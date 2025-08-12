@@ -28,6 +28,12 @@ Examples:
   # Debug mode with fewer episodes
   python run_sqli_rl.py --url "https://example.com/vuln.php" --episodes 5 --max-steps 10 --debug
 
+  # With custom blocked keywords
+  python run_sqli_rl.py --url "https://example.com/vuln.php" --blocked-keywords SELECT UNION DROP
+
+  # Using blocked keywords from file
+  python run_sqli_rl.py --url "https://example.com/vuln.php" --blocked-keywords-file blocked_words.txt
+
   # Full training run
   python run_sqli_rl.py --url "https://example.com/vuln.php" --episodes 1000 --no-debug
         """
@@ -128,11 +134,23 @@ Examples:
     )
     
     parser.add_argument(
-        '--log-path', 
+        '--log-path',
         default='logs/',
         help='Directory to save logs (default: logs/)'
     )
-    
+
+    parser.add_argument(
+        '--blocked-keywords',
+        nargs='*',
+        help='List of keywords that should be bypassed (e.g., --blocked-keywords SELECT UNION DROP)'
+    )
+
+    parser.add_argument(
+        '--blocked-keywords-file',
+        type=str,
+        help='Path to text file containing blocked keywords (one per line, overrides --blocked-keywords)'
+    )
+
     return parser.parse_args()
 
 
@@ -143,6 +161,19 @@ def main():
     # Determine debug mode
     debug_mode = args.debug and not args.no_debug
     
+    # Determine blocked keywords source
+    blocked_keywords = None
+    if args.blocked_keywords_file:
+        # File path takes priority
+        blocked_keywords = args.blocked_keywords_file
+        print(f"📁 Using blocked keywords from file: {args.blocked_keywords_file}")
+    elif args.blocked_keywords:
+        # Use provided list
+        blocked_keywords = args.blocked_keywords
+        print(f"📝 Using custom blocked keywords: {', '.join(args.blocked_keywords)}")
+    else:
+        print("🛡️ Using default blocked keywords")
+
     # Build configuration
     config = {
         'target_url': args.url,
@@ -158,7 +189,8 @@ def main():
         'debug_mode': debug_mode,
         'debug_frequency': args.debug_freq,
         'model_save_path': args.model_path,
-        'log_save_path': args.log_path
+        'log_save_path': args.log_path,
+        'blocked_keywords': blocked_keywords
     }
     
     # Display configuration

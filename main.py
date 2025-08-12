@@ -8,6 +8,7 @@ import torch
 import matplotlib.pyplot as plt
 import json
 import os
+import logging
 from datetime import datetime
 from typing import Dict, List, Any
 
@@ -36,7 +37,7 @@ class SQLiRLTrainer:
             'target_update_freq': 100,
             'initial_temperature': 2.0,
             'min_temperature': 0.1,
-            'temperature_decay': 0.99999999,
+            'temperature_decay': 0.9999,
             'save_frequency': 100,
             'log_frequency': 10,
             'model_save_path': 'models/',
@@ -50,14 +51,20 @@ class SQLiRLTrainer:
         # Create directories
         os.makedirs(self.config['model_save_path'], exist_ok=True)
         os.makedirs(self.config['log_save_path'], exist_ok=True)
-        
+
+        # Setup debug logger if debug mode is enabled
+        self.debug_logger = None
+        if self.config.get('debug_mode', False):
+            self._setup_debug_logger()
+
         # Initialize environment
         self.env = SQLiEnvironment(
             target_url=self.config['target_url'],
             parameter=self.config['parameter'],
             method=self.config['method'],
             injection_point=self.config.get('injection_point', '1'),
-            max_steps=self.config['max_steps_per_episode']
+            max_steps=self.config['max_steps_per_episode'],
+            blocked_keywords=self.config.get('blocked_keywords', None)
         )
         
         # Initialize agent with dynamic sizing
@@ -158,7 +165,51 @@ class SQLiRLTrainer:
         self._plot_training_results()
         
         print("\nTraining completed!")
-    
+
+        # Close debug logger
+        if self.debug_logger:
+            self.debug_logger.info("")
+            self.debug_logger.info("🎯 TRAINING COMPLETED!")
+            self.debug_logger.info("=" * 80)
+            # Close all handlers
+            for handler in self.debug_logger.handlers[:]:
+                handler.close()
+                self.debug_logger.removeHandler(handler)
+
+    def _setup_debug_logger(self):
+        """Setup debug logger to write to file"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        debug_log_file = os.path.join(self.config['log_save_path'], f'debug_{timestamp}.log')
+
+        # Create logger
+        self.debug_logger = logging.getLogger('sqli_debug')
+        self.debug_logger.setLevel(logging.DEBUG)
+
+        # Remove existing handlers
+        for handler in self.debug_logger.handlers[:]:
+            self.debug_logger.removeHandler(handler)
+
+        # Create file handler
+        file_handler = logging.FileHandler(debug_log_file, mode='w', encoding='utf-8')
+        file_handler.setLevel(logging.DEBUG)
+
+        # Create formatter
+        formatter = logging.Formatter('%(asctime)s - %(message)s', datefmt='%H:%M:%S')
+        file_handler.setFormatter(formatter)
+
+        # Add handler to logger
+        self.debug_logger.addHandler(file_handler)
+
+        print(f"📝 Debug logging enabled: {debug_log_file}")
+        self.debug_logger.info("=" * 80)
+        self.debug_logger.info("🚀 SQL INJECTION RL TRAINING DEBUG LOG")
+        self.debug_logger.info("=" * 80)
+        self.debug_logger.info(f"Target URL: {self.config['target_url']}")
+        self.debug_logger.info(f"Parameter: {self.config['parameter']}")
+        self.debug_logger.info(f"Episodes: {self.config['num_episodes']}")
+        self.debug_logger.info(f"Max steps per episode: {self.config['max_steps_per_episode']}")
+        self.debug_logger.info("=" * 80)
+
     def _run_episode(self, episode_num: int) -> tuple:
         """Run a single episode"""
         state = self.env.reset()
@@ -166,12 +217,13 @@ class SQLiRLTrainer:
         step_count = 0
         episode_success = False
 
-        if self.config['debug_mode']:
-            print(f"\n{'='*60}")
-            print(f"🚀 EPISODE {episode_num} STARTED")
-            print(f"{'='*60}")
-            print(f"Initial state shape: {np.array(state).shape}")
-            print(f"Initial state (first 10 tokens): {state[:10]}")
+        if self.config['debug_mode'] and self.debug_logger:
+            self.debug_logger.info("")
+            self.debug_logger.info("=" * 60)
+            self.debug_logger.info(f"🚀 EPISODE {episode_num} STARTED")
+            self.debug_logger.info("=" * 60)
+            self.debug_logger.info(f"Initial state shape: {np.array(state).shape}")
+            self.debug_logger.info(f"Initial state (first 10 tokens): {state[:10]}")
 
         while True:
             step_count += 1
@@ -180,115 +232,116 @@ class SQLiRLTrainer:
             action = self.agent.select_token(state)
 
             # Get Q-values for debugging
-            if self.config['debug_mode'] and step_count % self.config['debug_frequency'] == 0:
+            if self.config['debug_mode'] and self.debug_logger and step_count % self.config['debug_frequency'] == 0:
                 q_values = self.agent.get_q_values(state)
                 top_5_actions = np.argsort(q_values)[-5:][::-1]
 
-                print(f"\n🔍 STEP {step_count} DEBUG INFO:")
-                print(f"{'─'*50}")
+                self.debug_logger.info("")
+                self.debug_logger.info(f"🔍 STEP {step_count} DEBUG INFO:")
+                self.debug_logger.info("─" * 50)
 
                 # Show current state info
                 current_payload = self.env.current_payload
 
-                print(f"📊 Current State:")
-                print(f"  • State vector size: {len(state)}")
-                print(f"  • Current payload: '{current_payload}'")
-                print(f"  • Payload length: {len(current_payload)} chars")
-                print(f"  • State range: [{state.min():.3f}, {state.max():.3f}]")
+                self.debug_logger.info("📊 Current State:")
+                self.debug_logger.info(f"  • State vector size: {len(state)}")
+                self.debug_logger.info(f"  • Current payload: '{current_payload}'")
+                self.debug_logger.info(f"  • Payload length: {len(current_payload)} chars")
+                self.debug_logger.info(f"  • State range: [{state.min():.3f}, {state.max():.3f}]")
 
                 # Show Q-values and action selection
-                print(f"🧠 Agent Decision:")
-                print(f"  • Selected action (token ID): {action}")
-                print(f"  • Selected token: '{self.env.gen_action.get_token_name(action)}'")
-                print(f"  • Q-value for selected action: {q_values[action]:.4f}")
-                print(f"  • Temperature: {self.agent.exploration.temperature:.4f}")
+                self.debug_logger.info("🧠 Agent Decision:")
+                self.debug_logger.info(f"  • Selected action (token ID): {action}")
+                self.debug_logger.info(f"  • Selected token: '{self.env.gen_action.get_token_name(action)}'")
+                self.debug_logger.info(f"  • Q-value for selected action: {q_values[action]:.4f}")
+                self.debug_logger.info(f"  • Temperature: {self.agent.exploration.temperature:.4f}")
 
-                print(f"  • Top 5 Q-values:")
+                self.debug_logger.info("  • Top 5 Q-values:")
                 for i, act_id in enumerate(top_5_actions):
                     token_name = self.env.gen_action.get_token_name(act_id)
-                    print(f"    {i+1}. Token '{token_name}' (ID:{act_id}) = {q_values[act_id]:.4f}")
+                    self.debug_logger.info(f"    {i+1}. Token '{token_name}' (ID:{act_id}) = {q_values[act_id]:.4f}")
 
             # Environment step
             next_state, reward, done, info = self.env.step(action)
 
             # Debug bypass processing results
-            if self.config['debug_mode'] and step_count % self.config['debug_frequency'] == 0:
-                print(f"🔧 Bypass Processing:")
-                print(f"  • Original token: '{info.get('original_token', 'N/A')}'")
-                print(f"  • Processed token: '{info.get('processed_token', 'N/A')}'")
-                print(f"  • Bypass applied: {info.get('bypass_applied', False)}")
+            if self.config['debug_mode'] and self.debug_logger and step_count % self.config['debug_frequency'] == 0:
+                self.debug_logger.info("🔧 Bypass Processing:")
+                self.debug_logger.info(f"  • Original token: '{info.get('original_token', 'N/A')}'")
+                self.debug_logger.info(f"  • Processed token: '{info.get('processed_token', 'N/A')}'")
+                self.debug_logger.info(f"  • Bypass applied: {info.get('bypass_applied', False)}")
                 if info.get('bypass_method'):
-                    print(f"  • Bypass method: {info['bypass_method']}")
-                    print(f"  • Bypass success: {info.get('bypass_success', 'N/A')}")
+                    self.debug_logger.info(f"  • Bypass method: {info['bypass_method']}")
+                    self.debug_logger.info(f"  • Bypass success: {info.get('bypass_success', 'N/A')}")
 
             # Debug environment step results
-            if self.config['debug_mode'] and step_count % self.config['debug_frequency'] == 0:
-                print(f"🌐 Environment Response:")
-                print(f"  • Final URL: '{info.get('final_url', 'N/A')}'")
-                print(f"  • Final payload: '{info['payload']}'")
-                print(f"  • HTTP status: {info['response_status']}")
-                print(f"  • Response length: {info['response_length']} chars")
-                print(f"  • Response time: {info['response_time']:.3f}s")
-                print(f"  • WAF blocked: {info['is_blocked']}")
-                print(f"  • SQL error detected: {info['error_detected']}")
-                print(f"  • SQLi success detected: {info['sqli_detected']}")
-                print(f"  • Reward: {reward:.2f}")
+            if self.config['debug_mode'] and self.debug_logger and step_count % self.config['debug_frequency'] == 0:
+                self.debug_logger.info("🌐 Environment Response:")
+                self.debug_logger.info(f"  • Final URL: '{info.get('final_url', 'N/A')}'")
+                self.debug_logger.info(f"  • Final payload: '{info['payload']}'")
+                self.debug_logger.info(f"  • HTTP status: {info['response_status']}")
+                self.debug_logger.info(f"  • Response length: {info['response_length']} chars")
+                self.debug_logger.info(f"  • Response time: {info['response_time']:.3f}s")
+                self.debug_logger.info(f"  • WAF blocked: {info['is_blocked']}")
+                self.debug_logger.info(f"  • SQL error detected: {info['error_detected']}")
+                self.debug_logger.info(f"  • SQLi success detected: {info['sqli_detected']}")
+                self.debug_logger.info(f"  • Reward: {reward:.2f}")
 
                 # Enhanced error information display
                 if info['error_detected']:
-                    print(f"🔍 SQL Error Analysis:")
-                    print(f"  • Database type: {info.get('database_type', 'unknown')}")
+                    self.debug_logger.info("🔍 SQL Error Analysis:")
+                    self.debug_logger.info(f"  • Database type: {info.get('database_type', 'unknown')}")
 
                     if info.get('extracted_columns'):
-                        print(f"  • Extracted columns: {info['extracted_columns']}")
+                        self.debug_logger.info(f"  • Extracted columns: {info['extracted_columns']}")
 
                     if info.get('extracted_tables'):
-                        print(f"  • Extracted tables: {info['extracted_tables']}")
+                        self.debug_logger.info(f"  • Extracted tables: {info['extracted_tables']}")
 
                     if info.get('error_messages'):
-                        print(f"  • Error messages: {info['error_messages'][:2]}")  # Show first 2 messages
+                        self.debug_logger.info(f"  • Error messages: {info['error_messages'][:2]}")  # Show first 2 messages
 
                     error_info = info.get('error_info', {})
                     if error_info.get('detected_patterns'):
-                        print(f"  • Detected patterns: {error_info['detected_patterns'][:3]}")  # Show first 3 patterns
+                        self.debug_logger.info(f"  • Detected patterns: {error_info['detected_patterns'][:3]}")  # Show first 3 patterns
 
                 # Show response content preview if there's an error or success
                 if info['error_detected'] or info['sqli_detected'] or info['is_blocked']:
-                    print(f"  • Response preview: '{info.get('response_content_preview', 'N/A')}'")
+                    self.debug_logger.info(f"  • Response preview: '{info.get('response_content_preview', 'N/A')}'")
 
                 # Show baseline comparison
                 if info.get('baseline_status') and info.get('baseline_length'):
                     status_diff = info['response_status'] != info['baseline_status']
                     length_diff = abs(info['response_length'] - info['baseline_length'])
-                    print(f"  • Baseline comparison:")
-                    print(f"    - Status changed: {'✅' if status_diff else '❌'} ({info['baseline_status']} → {info['response_status']})")
-                    print(f"    - Length diff: {length_diff} chars ({info['baseline_length']} → {info['response_length']})")
+                    self.debug_logger.info("  • Baseline comparison:")
+                    self.debug_logger.info(f"    - Status changed: {'✅' if status_diff else '❌'} ({info['baseline_status']} → {info['response_status']})")
+                    self.debug_logger.info(f"    - Length diff: {length_diff} chars ({info['baseline_length']} → {info['response_length']})")
 
                 # Show simple state information
-                print(f"📈 State Update:")
-                print(f"  • State vector length: {len(next_state)}")
-                print(f"  • State features (first 10): {next_state[:10]}")
-                print(f"  • Updated payload: '{info['payload']}'")
-                print(f"  • Payload length: {len(info['payload'])} chars")
-                print(f"  • Episode done: {done}")
+                self.debug_logger.info("📈 State Update:")
+                self.debug_logger.info(f"  • State vector length: {len(next_state)}")
+                self.debug_logger.info(f"  • State features (first 10): {next_state[:10]}")
+                self.debug_logger.info(f"  • Updated payload: '{info['payload']}'")
+                self.debug_logger.info(f"  • Payload length: {len(info['payload'])} chars")
+                self.debug_logger.info(f"  • Episode done: {done}")
 
                 # Show state breakdown if debug
                 if hasattr(self.env, 'state_manager'):
                     debug_info = self.env.state_manager.debug_state(next_state)
-                    print(f"  • Payload features: {list(debug_info['payload_features'].values())[:5]}...")
-                    print(f"  • Response features: {list(debug_info['response_features'].values())[:5]}...")
-                    print(f"  • WAF features: {list(debug_info['waf_features'].values())[:5]}...")
+                    self.debug_logger.info(f"  • Payload features: {list(debug_info['payload_features'].values())[:5]}...")
+                    self.debug_logger.info(f"  • Response features: {list(debug_info['response_features'].values())[:5]}...")
+                    self.debug_logger.info(f"  • WAF features: {list(debug_info['waf_features'].values())[:5]}...")
 
                 if done:
-                    print(f"🏁 Episode termination reason:")
+                    self.debug_logger.info("🏁 Episode termination reason:")
                     if info['sqli_detected']:
-                        print(f"  ✅ SQL injection success!")
+                        self.debug_logger.info("  ✅ SQL injection success!")
                     elif step_count >= self.config['max_steps_per_episode']:
-                        print(f"  ⏰ Maximum steps reached")
+                        self.debug_logger.info("  ⏰ Maximum steps reached")
                     elif info.get('is_complete', False):
-                        print(f"  🔚 END_TOKEN reached")
+                        self.debug_logger.info("  🔚 END_TOKEN reached")
                     elif info.get('is_full', False):
-                        print(f"  📦 State is full")
+                        self.debug_logger.info("  📦 State is full")
 
             # Store experience
             self.agent.remember(state, action, reward, next_state, done)
@@ -308,13 +361,14 @@ class SQLiRLTrainer:
             if done:
                 break
 
-        if self.config['debug_mode']:
-            print(f"\n🏆 EPISODE {episode_num} SUMMARY:")
-            print(f"  • Total steps: {step_count}")
-            print(f"  • Total reward: {total_reward:.2f}")
-            print(f"  • Success: {'✅ YES' if episode_success else '❌ NO'}")
-            print(f"  • Final payload: '{info.get('payload', '')}'")
-            print(f"{'='*60}")
+        if self.config['debug_mode'] and self.debug_logger:
+            self.debug_logger.info("")
+            self.debug_logger.info(f"🏆 EPISODE {episode_num} SUMMARY:")
+            self.debug_logger.info(f"  • Total steps: {step_count}")
+            self.debug_logger.info(f"  • Total reward: {total_reward:.2f}")
+            self.debug_logger.info(f"  • Success: {'✅ YES' if episode_success else '❌ NO'}")
+            self.debug_logger.info(f"  • Final payload: '{info.get('payload', '')}'")
+            self.debug_logger.info("=" * 60)
 
         return total_reward, step_count, episode_success
     
@@ -468,7 +522,7 @@ class SQLiRLTrainer:
                 'memory_size': base_config['memory_size'] * 2,
                 'batch_size': min(base_config['batch_size'] * 2, 128),
                 'initial_temperature': base_config['initial_temperature'] * 1.5,
-                'temperature_decay': max(base_config['temperature_decay'] * 0.99999999, 0.98)
+                'temperature_decay': max(base_config['temperature_decay'] * 0.9999, 0.98)
             }
             print("   → Adjusted for medium action space")
             return adjusted
@@ -480,7 +534,7 @@ class SQLiRLTrainer:
                 'memory_size': base_config['memory_size'] * 5,
                 'batch_size': min(base_config['batch_size'] * 4, 256),
                 'initial_temperature': base_config['initial_temperature'] * 2.0,
-                'temperature_decay': max(base_config['temperature_decay'] * 0.99999999, 0.98)
+                'temperature_decay': max(base_config['temperature_decay'] * 0.9999, 0.98)
             }
             print("   → Adjusted for large action space")
             return adjusted

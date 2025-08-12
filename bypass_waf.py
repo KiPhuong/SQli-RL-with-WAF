@@ -7,13 +7,23 @@ import random
 import urllib.parse
 import base64
 import re
-from typing import Dict, List, Any, Optional
+import os
+from typing import Dict, List, Any, Optional, Union
 
 
 class BypassWAF:
     """WAF bypass techniques for SQL injection payloads"""
     
-    def __init__(self):
+    def __init__(self, blocked_keywords: Optional[Union[List[str], str]] = None):
+        """
+        Initialize BypassWAF with optional custom blocked keywords
+
+        Args:
+            blocked_keywords: Can be:
+                - None: Use default blocked keywords
+                - List[str]: Custom list of keywords to block
+                - str: Path to text file containing keywords (one per line)
+        """
         self.bypass_methods = {
             'case_variation': self._case_variation,
             'comment_insertion': self._comment_insertion,
@@ -26,21 +36,111 @@ class BypassWAF:
             'function_obfuscation': self._function_obfuscation,
             'arithmetic_obfuscation': self._arithmetic_obfuscation
         }
-        
+
         # WAF detection patterns (simple heuristics)
         self.waf_indicators = [
             'blocked', 'forbidden', 'access denied', 'security violation',
             'malicious request', 'attack detected', 'suspicious activity',
-            'cloudflare', 'mod_security', 'imperva', 'f5', 'barracuda'
+            'cloudflare', 'mod_security', 'imperva', 'f5', 'barracuda',
+            'incapsula', 'sucuri', 'akamai', 'aws waf', 'azure waf'
         ]
-        
-        # Commonly blocked keywords
-        self.blocked_keywords = [
+
+        # Default blocked keywords
+        default_blocked_keywords = [
             'SELECT', 'UNION', 'INSERT', 'UPDATE', 'DELETE', 'DROP',
-            'EXEC', 'EXECUTE', 'SCRIPT', 'ALERT', 'ONLOAD', 'ONERROR'
+            'EXEC', 'EXECUTE', 'SCRIPT', 'ALERT', 'ONLOAD', 'ONERROR',
+            'CREATE', 'ALTER', 'TRUNCATE', 'GRANT', 'REVOKE'
         ]
-    
-    def is_likely_blocked(self, response_status: int, response_content: str, 
+
+        # Load blocked keywords based on input type
+        self.blocked_keywords = self._load_blocked_keywords(blocked_keywords, default_blocked_keywords)
+
+    def _load_blocked_keywords(self, blocked_keywords: Optional[Union[List[str], str]],
+                              default_keywords: List[str]) -> List[str]:
+        """
+        Load blocked keywords from various sources
+
+        Args:
+            blocked_keywords: None, list of keywords, or file path
+            default_keywords: Default keywords to use if None provided
+
+        Returns:
+            List of uppercase blocked keywords
+        """
+        if blocked_keywords is None:
+            # Use default keywords
+            keywords = default_keywords
+            print(f"🛡️ Using default blocked keywords: {len(keywords)} keywords")
+
+        elif isinstance(blocked_keywords, list):
+            # Use provided list
+            keywords = blocked_keywords
+            print(f"🛡️ Using custom blocked keywords: {len(keywords)} keywords")
+
+        elif isinstance(blocked_keywords, str):
+            # Load from file
+            try:
+                keywords = self._load_keywords_from_file(blocked_keywords)
+                print(f"🛡️ Loaded blocked keywords from file '{blocked_keywords}': {len(keywords)} keywords")
+            except Exception as e:
+                print(f"⚠️ Failed to load keywords from file '{blocked_keywords}': {e}")
+                print(f"🛡️ Falling back to default keywords: {len(default_keywords)} keywords")
+                keywords = default_keywords
+        else:
+            # Invalid type, use default
+            print(f"⚠️ Invalid blocked_keywords type: {type(blocked_keywords)}")
+            print(f"🛡️ Using default keywords: {len(default_keywords)} keywords")
+            keywords = default_keywords
+
+        # Convert to uppercase for case-insensitive matching
+        return [keyword.upper().strip() for keyword in keywords if keyword.strip()]
+
+    def _load_keywords_from_file(self, file_path: str) -> List[str]:
+        """
+        Load keywords from text file (one keyword per line)
+
+        Args:
+            file_path: Path to text file containing keywords
+
+        Returns:
+            List of keywords from file
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            Exception: If file can't be read
+        """
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Keywords file not found: {file_path}")
+
+        keywords = []
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+
+                    # Skip empty lines and comments
+                    if not line or line.startswith('#'):
+                        continue
+
+                    # Handle multiple keywords per line (space or comma separated)
+                    if ',' in line:
+                        line_keywords = [kw.strip() for kw in line.split(',')]
+                    else:
+                        line_keywords = line.split()
+
+                    for keyword in line_keywords:
+                        if keyword:  # Skip empty strings
+                            keywords.append(keyword)
+
+            if not keywords:
+                raise Exception("No valid keywords found in file")
+
+            return keywords
+
+        except Exception as e:
+            raise Exception(f"Error reading file: {e}")
+
+    def is_likely_blocked(self, response_status: int, response_content: str,
                          response_time: float = 0) -> bool:
         """Determine if response indicates WAF blocking"""
         # Status code indicators
@@ -54,7 +154,7 @@ class BypassWAF:
                 return True
         
         # Suspiciously fast response (might indicate immediate blocking)
-        if response_time < 0.1 and response_status != 200:
+        if response_time < 0.02 and response_status != 200:
             return True
         
         return False

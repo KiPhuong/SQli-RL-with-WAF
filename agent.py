@@ -94,7 +94,7 @@ class SQLiRLAgent:
             'hidden_sizes': self._calculate_hidden_sizes(state_size, action_size),
             'initial_temperature': 2.0,
             'min_temperature': 0.1,
-            'temperature_decay': 0.99999999
+            'temperature_decay': 0.9999
         }
 
         print(f"🧠 Neural Network Architecture:")
