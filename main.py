@@ -36,7 +36,7 @@ class SQLiRLTrainer:
             'target_update_freq': 100,
             'initial_temperature': 2.0,
             'min_temperature': 0.1,
-            'temperature_decay': 0.99,
+            'temperature_decay': 0.99999999,
             'save_frequency': 100,
             'log_frequency': 10,
             'model_save_path': 'models/',
@@ -116,7 +116,10 @@ class SQLiRLTrainer:
         
         for episode in range(self.config['num_episodes']):
             episode_reward, episode_length, episode_success = self._run_episode(episode)
-            
+
+            # Decay temperature after each episode
+            self.agent.decay_temperature()
+
             # Store metrics
             self.episode_rewards.append(episode_reward)
             self.episode_lengths.append(episode_length)
@@ -465,7 +468,7 @@ class SQLiRLTrainer:
                 'memory_size': base_config['memory_size'] * 2,
                 'batch_size': min(base_config['batch_size'] * 2, 128),
                 'initial_temperature': base_config['initial_temperature'] * 1.5,
-                'temperature_decay': max(base_config['temperature_decay'] * 0.995, 0.985)
+                'temperature_decay': max(base_config['temperature_decay'] * 0.99999999, 0.98)
             }
             print("   → Adjusted for medium action space")
             return adjusted
@@ -477,7 +480,7 @@ class SQLiRLTrainer:
                 'memory_size': base_config['memory_size'] * 5,
                 'batch_size': min(base_config['batch_size'] * 4, 256),
                 'initial_temperature': base_config['initial_temperature'] * 2.0,
-                'temperature_decay': max(base_config['temperature_decay'] * 0.99, 0.98)
+                'temperature_decay': max(base_config['temperature_decay'] * 0.99999999, 0.98)
             }
             print("   → Adjusted for large action space")
             return adjusted

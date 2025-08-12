@@ -49,7 +49,7 @@ class BoltzmannExploration:
     """Boltzmann (Softmax) exploration strategy"""
     
     def __init__(self, initial_temperature: float = 2.0, min_temperature: float = 0.1, 
-                 decay_rate: float = 0.995):
+                 decay_rate: float = 0.99):
         self.initial_temperature = initial_temperature
         self.temperature = initial_temperature
         self.min_temperature = min_temperature
@@ -94,7 +94,7 @@ class SQLiRLAgent:
             'hidden_sizes': self._calculate_hidden_sizes(state_size, action_size),
             'initial_temperature': 2.0,
             'min_temperature': 0.1,
-            'temperature_decay': 0.995
+            'temperature_decay': 0.99999999
         }
 
         print(f"🧠 Neural Network Architecture:")
@@ -196,14 +196,16 @@ class SQLiRLAgent:
         self.step_count += 1
         if self.step_count % self.config['target_update_freq'] == 0:
             self.update_target_network()
-        
-        # Update exploration temperature
-        self.exploration.update_temperature()
     
     def update_target_network(self):
         """Copy weights from main network to target network"""
         self.target_network.load_state_dict(self.q_network.state_dict())
-    
+
+    def decay_temperature(self):
+        """Decay temperature after each episode"""
+        self.exploration.update_temperature()
+        #print(f"🌡️ Temperature decayed to: {self.exploration.temperature:.6f}")
+
     def save_model(self, filepath: str):
         """Save the trained model"""
         torch.save({

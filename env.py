@@ -152,8 +152,8 @@ class SQLiEnvironment:
             'sqli_detected': self._detect_sqli_success(response),
             'error_detected': error_info['has_error'],
             'error_info': error_info,
-            'is_complete': len(self.current_payload) >= 200,  # Simple completion check
-            'is_full': len(self.current_payload) >= 200
+            'is_complete': len(self.current_payload) >= 1000,  # Simple completion check
+            'is_full': len(self.current_payload) >= 1000
         }
         
         # Store in history
@@ -182,9 +182,17 @@ class SQLiEnvironment:
             if '?' in self.target_url:
                 if f"{self.parameter}=" in self.target_url:
                     import re
-                    pattern = f"({self.parameter}={re.escape(self.injection_point)})"
+                    # Escape special regex characters in injection_point
+                    escaped_injection_point = re.escape(str(self.injection_point))
+                    pattern = f"({self.parameter}={escaped_injection_point})"
                     replacement = f"{self.parameter}={injection_value}"
-                    final_url = re.sub(pattern, replacement, self.target_url)
+                    try:
+                        final_url = re.sub(pattern, replacement, self.target_url)
+                    except re.error as e:
+                        # Fallback: simple string replacement
+                        old_param = f"{self.parameter}={self.injection_point}"
+                        new_param = f"{self.parameter}={injection_value}"
+                        final_url = self.target_url.replace(old_param, new_param)
                 else:
                     final_url = f"{self.target_url}&{self.parameter}={injection_value}"
             else:
@@ -389,7 +397,7 @@ class SQLiEnvironment:
         """Determine if episode should end"""
         return (self.step_count >= self.max_steps or
                 self._detect_sqli_success(response) or
-                len(self.current_payload) >= 200)
+                len(self.current_payload) >= 1000)
     
     def get_state_size(self) -> int:
         """Get state size"""
