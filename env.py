@@ -300,7 +300,7 @@ class SQLiEnvironment:
         content_lower = content.lower()
         
         error_patterns = {
-            'mysql': ['unknown column', 'mysql_fetch_array', 'mysql_num_rows', 'you have an error in your sql syntax'],
+            'mysql': ['unknown column', 'mysql_fetch_array', 'mysql_num_rows', 'you have an error in your sql syntax', 'different number of columns'],
             'postgresql': ['postgresql', 'pg_query', 'column does not exist', 'relation does not exist'],
             'oracle': ['ora-', 'oracle', 'oci_execute'],
             'mssql': ['microsoft ole db provider', 'unclosed quotation mark', 'syntax error'],
@@ -376,8 +376,9 @@ class SQLiEnvironment:
         
         # Error-based patterns
         success_patterns = [
-            'mysql_fetch_array', 'mysql_num_rows', 'warning: mysql',
-            'ora-01756', 'ora-00933', 'warning: pg_', 'warning: oci_'
+            'zixem@localhost$', '8.0.36',
+            # 'mysql_fetch_array', 'mysql_num_rows', 'warning: mysql',
+            # 'ora-01756', 'ora-00933', 'warning: pg_', 'warning: oci_'
         ]
         
         return any(pattern in content for pattern in success_patterns)
