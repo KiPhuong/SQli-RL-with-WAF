@@ -118,21 +118,15 @@ class SQLiRLAgent:
         Xây dựng bảng chuyển tiếp token từ file sqli_misc.txt
         """
         table = {}
-        # print("Đang đọc file:", filename)
-        # if not os.path.exists(filename):
-        #     print("Không tìm thấy file.")
-        #     return table
         with open(filename, 'r', encoding='utf-8') as f:
             for line in f:
-                tokens = line.strip().split()
-                #print("Tokens:", tokens)
+                tokens = [t.upper() for t in line.strip().split()]
                 for i in range(len(tokens) - 1):
                     prev_token = tokens[i]
                     next_token = tokens[i + 1]
                     if prev_token not in table:
                         table[prev_token] = []
                     table[prev_token].append(next_token)
-        #print("Transition table:", table)
         return table
 
     def select_token(self, state: np.ndarray, step_idx: int = 0, prev_token: str = None) -> int:

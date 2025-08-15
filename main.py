@@ -92,6 +92,8 @@ class SQLiRLTrainer:
         self.episode_lengths = []
         self.success_episodes = []
         self.exploration_temps = []
+        self.payloads = []
+        #self.tokens = []
         
         print(f"🚀 Initialized SQLi RL Trainer")
         print(f"📊 State size: {state_size}")
@@ -133,6 +135,7 @@ class SQLiRLTrainer:
             self.episode_lengths.append(episode_length)
             self.success_episodes.append(episode_success)
             self.exploration_temps.append(self.agent.exploration.temperature)
+
             
             # Log progress
             if episode % self.config['log_frequency'] == 0:
@@ -231,6 +234,7 @@ class SQLiRLTrainer:
 
             # Agent selects action
             action = self.agent.select_token(state, step_idx)
+            
             step_idx +=1
             # Get Q-values for debugging
             if self.config['debug_mode'] and self.debug_logger and step_count % self.config['debug_frequency'] == 0:
@@ -264,6 +268,7 @@ class SQLiRLTrainer:
 
             # Environment step
             next_state, reward, done, info = self.env.step(action)
+            self.payloads.append(self.env.current_payload)
 
             # Debug bypass processing results
             if self.config['debug_mode'] and self.debug_logger and step_count % self.config['debug_frequency'] == 0:
@@ -331,7 +336,7 @@ class SQLiRLTrainer:
                     debug_info = self.env.state_manager.debug_state(next_state)
                     self.debug_logger.info(f"  • Payload features: {list(debug_info['payload_features'].values())[:5]}...")
                     self.debug_logger.info(f"  • Response features: {list(debug_info['response_features'].values())[:5]}...")
-                    self.debug_logger.info(f"  • WAF features: {list(debug_info['waf_features'].values())[:5]}...")
+                    self.debug_logger.info(f"  • WAF features: {list(debug_info['waf_features'].values())[:5]}...") 
 
                 if done:
                     self.debug_logger.info("🏁 Episode termination reason:")
@@ -384,6 +389,7 @@ class SQLiRLTrainer:
             'episode_lengths': self.episode_lengths,
             'success_episodes': self.success_episodes,
             'exploration_temps': self.exploration_temps,
+            'payloads': self.payloads,
             'final_stats': {
                 'total_episodes': len(self.episode_rewards),
                 'average_reward': np.mean(self.episode_rewards),
