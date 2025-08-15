@@ -78,7 +78,7 @@ class SQLiRLAgent:
         print(f"   Input: {state_size} → Hidden: {self.config['hidden_sizes']} → Output: {action_size}")
 
         # Token handling
-        self.start_tokens = ['SELECT', '1', "'", '"', '(']  # Có thể điều chỉnh
+        self.start_tokens = ['SELECT','WITH','INSERT','UPDATE','DELETE','VALUES', "'", '"', '(', '1', '0', 'NULL', '--', '/*', '#', 'OR', 'UNION'] # Có thể điều chỉnh
         self.token_list = self._get_token_list()
         self.token_to_id = {token: idx for idx, token in enumerate(self.token_list)}
         self.id_to_token = {idx: token for idx, token in enumerate(self.token_list)}
@@ -136,31 +136,31 @@ class SQLiRLAgent:
         return table
 
     def select_token(self, state: np.ndarray, step_idx: int = 0, prev_token: str = None) -> int:
-        """Select token using Q-values with masking from start_tokens & transition_table"""
         self.q_network.eval()
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
             q_values = self.q_network(state_tensor).cpu().numpy()[0]
 
-        # Default small prob for all
-        probs = np.ones_like(q_values) * 0.01
-
+        mask = np.zeros_like(q_values)
         if step_idx == 0:
             for token in self.start_tokens:
                 idx = self.token_to_id.get(token)
                 if idx is not None:
-                    probs[idx] = 1.0
+                    mask[idx] = 1
         elif prev_token and prev_token in self.transition_table:
             for token in self.transition_table[prev_token]:
                 idx = self.token_to_id.get(token)
                 if idx is not None:
-                    probs[idx] += 1.0
+                    mask[idx] = 1
         else:
-            return self.exploration.select_action(q_values)
-        
-        probs = probs / probs.sum()
+            mask[:] = 1  # không match mapping → cho tất cả hợp lệ
+
+        masked_q = np.where(mask, q_values, -np.inf)
+        exp_q = np.exp(masked_q - np.max(masked_q))
+        probs = exp_q / np.sum(exp_q)
         action = np.random.choice(len(q_values), p=probs)
         return action
+
 
     def get_q_values(self, state: np.ndarray) -> np.ndarray:
         self.q_network.eval()
