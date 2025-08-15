@@ -52,6 +52,10 @@ class BypassWAF:
             'CREATE', 'ALTER', 'TRUNCATE', 'GRANT', 'REVOKE'
         ]
 
+        self.baseline_200 = None
+        self.baseline_404 = None
+        self.content_size_threshold = 0.5 
+
         # Load blocked keywords based on input type
         self.blocked_keywords = self._load_blocked_keywords(blocked_keywords, default_blocked_keywords)
 
@@ -139,6 +143,8 @@ class BypassWAF:
 
         except Exception as e:
             raise Exception(f"Error reading file: {e}")
+        
+    
 
     def is_likely_blocked(self, response_status: int, response_content: str,
                          response_time: float = 0) -> bool:
@@ -151,11 +157,12 @@ class BypassWAF:
         content_lower = response_content.lower()
         for indicator in self.waf_indicators:
             if indicator in content_lower:
+                #print("check...", indicator)
                 return True
         
         # Suspiciously fast response (might indicate immediate blocking)
-        if response_time < 0.02 and response_status != 200:
-            return True
+        # if response_time < 0.02 and response_status != 200:
+        #     return True
         
         return False
     

@@ -153,8 +153,8 @@ class SQLiEnvironment:
             'sqli_detected': self._detect_sqli_success(response),
             'error_detected': error_info['has_error'],
             'error_info': error_info,
-            'is_complete': len(self.current_payload) >= 1000,  # Simple completion check
-            'is_full': len(self.current_payload) >= 1000
+            'is_complete': len(self.current_payload) >= 200,  # Simple completion check
+            'is_full': len(self.current_payload) >= 200
         }
         
         # Store in history
@@ -264,7 +264,7 @@ class SQLiEnvironment:
                 response = self.session.post(self.target_url, data=data, timeout=self.timeout, allow_redirects=False)
             
             response_time = time.time() - start_time
-            
+            #print("response content:", response.text)
             return {
                 'status_code': response.status_code,
                 'content': response.text,
@@ -399,7 +399,7 @@ class SQLiEnvironment:
         """Determine if episode should end"""
         return (self.step_count >= self.max_steps or
                 self._detect_sqli_success(response) or
-                len(self.current_payload) >= 1000)
+                len(self.current_payload) >= 200)
     
     def get_state_size(self) -> int:
         """Get state size"""

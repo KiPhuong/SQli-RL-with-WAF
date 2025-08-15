@@ -109,6 +109,7 @@ class SQLiRLTrainer:
             sample_tokens = self.env.gen_action.action_space.get_all_tokens()[:10]
             print(f"  • Sample tokens: {sample_tokens}")
             print(f"  • Total vocabulary size: {len(self.env.gen_action.action_space.get_all_tokens())}")
+            
 
             # Show baseline info
             if self.env.baseline_response:
@@ -224,13 +225,13 @@ class SQLiRLTrainer:
             self.debug_logger.info("=" * 60)
             self.debug_logger.info(f"Initial state shape: {np.array(state).shape}")
             self.debug_logger.info(f"Initial state (first 10 tokens): {state[:10]}")
-
+        step_idx = 0  
         while True:
             step_count += 1
 
             # Agent selects action
-            action = self.agent.select_token(state)
-
+            action = self.agent.select_token(state, step_idx)
+            step_idx +=1
             # Get Q-values for debugging
             if self.config['debug_mode'] and self.debug_logger and step_count % self.config['debug_frequency'] == 0:
                 q_values = self.agent.get_q_values(state)
