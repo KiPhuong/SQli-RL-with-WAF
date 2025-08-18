@@ -17,29 +17,72 @@ class ActionSpace:
         self.id_to_token = {}
         self.load_keywords()
     
+    # def load_keywords(self):
+    #     """Load keywords from file and create mappings"""
+    #     try:
+    #         with open(self.keywords_file, 'r', encoding='utf-8') as f:
+    #             lines = f.readlines()
+            
+    #         # Filter out comments and empty lines
+    #         keywords = []
+    #         for line in lines:
+    #             line = line.strip()
+    #             if line and not line.startswith('#'):
+    #                 keywords.append(line)
+            
+    #         # Create mappings
+    #         self.tokens = keywords
+    #         self.token_to_id = {token: i for i, token in enumerate(keywords)}
+    #         self.id_to_token = {i: token for i, token in enumerate(keywords)}
+            
+    #         print(f"Loaded {len(self.tokens)} tokens from {self.keywords_file}")
+            
+    #     except FileNotFoundError:
+    #         print(f"Warning: {self.keywords_file} not found. Using default tokens.")
+    #         self._create_default_tokens()
     def load_keywords(self):
-        """Load keywords from file and create mappings"""
+        """Load keywords from file, remove duplicates, normalize, and create mappings"""
         try:
             with open(self.keywords_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
-            
-            # Filter out comments and empty lines
+
             keywords = []
+            seen = set()
+
             for line in lines:
-                line = line.strip()
-                if line and not line.startswith('#'):
-                    keywords.append(line)
-            
-            # Create mappings
+                token = line.strip()
+
+                # Bỏ comment và dòng rỗng
+                if not token:
+                    continue
+
+                # Giữ nguyên ký tự đặc biệt, chuẩn hóa keyword về UPPERCASE
+                if token.isalpha():  
+                    token = token.upper()
+
+                # Loại bỏ trùng lặp
+                if token not in seen:
+                    keywords.append(token)
+                    seen.add(token)
+
+            # Tạo mapping
             self.tokens = keywords
             self.token_to_id = {token: i for i, token in enumerate(keywords)}
             self.id_to_token = {i: token for i, token in enumerate(keywords)}
-            
-            print(f"Loaded {len(self.tokens)} tokens from {self.keywords_file}")
-            
-        except FileNotFoundError:
-            print(f"Warning: {self.keywords_file} not found. Using default tokens.")
-            self._create_default_tokens()
+
+            # print(f"[INFO] Loaded {len(self.tokens)} unique tokens from {self.keywords_file}")
+
+            # # Debug: check start_tokens
+            # self.start_tokens = ['SELECT','WITH','INSERT','UPDATE','DELETE','VALUES', "'", '"', '(', '1', '0', 'NULL', '--', '/*', '#', 'OR', 'UNION']
+            # missing = [t for t in self.start_tokens if t not in self.token_to_id]
+            # if missing:
+            #     print("[WARN] Missing start tokens:", missing)
+            # else:
+            #     print("[INFO] All start tokens found!")
+
+        except Exception as e:
+            print(f"[ERROR] Failed to load keywords: {e}")
+
     
     def _create_default_tokens(self):
         """Create default token set if file not found"""

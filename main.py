@@ -233,6 +233,7 @@ class SQLiRLTrainer:
             step_count += 1
 
             # Agent selects action
+
             action = self.agent.select_token(state, step_idx)
             
             step_idx +=1

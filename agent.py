@@ -7,6 +7,7 @@ import random
 from collections import deque
 from typing import List, Tuple, Dict, Any
 from env import SQLiEnvironment
+from gen_action import ActionSpace
 
 class DQN(nn.Module):
     """Deep Q-Network for token selection"""
@@ -79,10 +80,22 @@ class SQLiRLAgent:
 
         # Token handling
         self.start_tokens = ['SELECT','WITH','INSERT','UPDATE','DELETE','VALUES', "'", '"', '(', '1', '0', 'NULL', '--', '/*', '#', 'OR', 'UNION'] # Có thể điều chỉnh
+        
         self.token_list = self._get_token_list()
         self.token_to_id = {token: idx for idx, token in enumerate(self.token_list)}
         self.id_to_token = {idx: token for idx, token in enumerate(self.token_list)}
+        self.start_token_ids = [self.token_to_id[token] for token in self.start_tokens if token in self.token_to_id]
         self.transition_table = self._build_transition_table("sqli-misc.txt")
+        
+        # print(f"token list value: {self.token_list}")
+        # print(f"token to id value: {self.token_to_id}")
+        # print(f"start token ids value: {self.start_token_ids}")
+
+        # missing = [token for token in self.start_tokens if token not in self.token_to_id]
+        # if missing:
+        #     print("[WARN] Missing start tokens:", missing)
+        # else:
+        #     print("[INFO] All start tokens found!")
 
         # Networks
         self.q_network = DQN(state_size, action_size, self.config['hidden_sizes'])
@@ -111,7 +124,9 @@ class SQLiRLAgent:
 
     def _get_token_list(self):
         # Tùy vào project: có thể load từ file hoặc định nghĩa sẵn
-        return [str(i) for i in range(self.action_size)]
+        # return [str(i) for i in range(self.action_size)]
+        action_space = ActionSpace("keywords.txt")
+        return action_space.tokens
 
     def _build_transition_table(self, filename):
         """
@@ -127,6 +142,7 @@ class SQLiRLAgent:
                     if prev_token not in table:
                         table[prev_token] = []
                     table[prev_token].append(next_token)
+        #print(f"Mapping table: {table}")
         return table
 
     def select_token(self, state: np.ndarray, step_idx: int = 0, prev_token: str = None) -> int:
@@ -135,12 +151,10 @@ class SQLiRLAgent:
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
             q_values = self.q_network(state_tensor).cpu().numpy()[0]
 
-        mask = np.zeros_like(q_values)
+            mask = np.zeros_like(q_values)
         if step_idx == 0:
-            for token in self.start_tokens:
-                idx = self.token_to_id.get(token)
-                if idx is not None:
-                    mask[idx] = 1
+            for idx in self.start_token_ids:
+                mask[idx] = 1
         elif prev_token and prev_token in self.transition_table:
             for token in self.transition_table[prev_token]:
                 idx = self.token_to_id.get(token)
@@ -148,6 +162,10 @@ class SQLiRLAgent:
                     mask[idx] = 1
         else:
             mask[:] = 1  # không match mapping → cho tất cả hợp lệ
+
+        # Nếu không có action nào hợp lệ, fallback cho phép tất cả
+        if np.sum(mask) == 0:
+            mask[:] = 1
 
         masked_q = np.where(mask, q_values, -np.inf)
         exp_q = np.exp(masked_q - np.max(masked_q))

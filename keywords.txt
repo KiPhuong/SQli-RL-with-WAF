@@ -1,6 +1,3 @@
-# SQL Keywords and Operators for RL Agent Action Space
-# SQL-92 keywords (reference: http://developer.mimer.com/validator/sql-reserved-words.tml)
-ABSOLUTE
 ACTION
 ADD
 ALL
@@ -255,8 +252,6 @@ WRITE
 YEAR
 ZONE
 
-
-# SQL Operators
 =
 !=
 <>
@@ -271,8 +266,6 @@ EXISTS
 BETWEEN
 IS
 NULL
-
-# SQL Injection Specific
 '
 "
 --
@@ -290,7 +283,6 @@ NULL
 /
 %
 
-# Common Values
 1
 0
 2
@@ -299,13 +291,11 @@ TRUE
 FALSE
 NULL
 
-# Time-based Functions
 SLEEP
 WAITFOR
 DELAY
 BENCHMARK
 
-# Error-based Functions
 EXTRACTVALUE
 UPDATEXML
 XMLTYPE
@@ -317,7 +307,6 @@ HEX
 CONCAT
 SUBSTRING
 
-# Union-based
 ALL
 DISTINCT
 ORDER
@@ -327,7 +316,6 @@ HAVING
 LIMIT
 OFFSET
 
-# Boolean-based
 REGEXP
 RLIKE
 SOUNDS
@@ -336,7 +324,6 @@ AGAINST
 BINARY
 COLLATE
 
-# Conditional
 IF
 CASE
 WHEN
@@ -344,7 +331,6 @@ THEN
 ELSE
 END
 
-# Database Functions
 VERSION
 USER
 CURRENT_USER
@@ -355,17 +341,14 @@ SCHEMA_NAME
 TABLE_NAME
 COLUMN_NAME
 
-# Special Characters
 SPACE
 TAB
 NEWLINE
 RETURN
 
-# Encoding Indicators
 PERCENT
 UNDERSCORE
 BACKSLASH
 
-# Control Tokens
 PAD
 END_TOKEN
