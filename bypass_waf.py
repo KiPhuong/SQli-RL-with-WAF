@@ -147,24 +147,44 @@ class BypassWAF:
     
 
     def is_likely_blocked(self, response_status: int, response_content: str,
-                         response_time: float = 0) -> bool:
+                        response_time: float = 0) -> bool:
         """Determine if response indicates WAF blocking"""
-        # Status code indicators
+        
+        content_length = len(response_content)
+
+        # Lưu baseline cho 200 và 404 lần đầu
+        if response_status == 200 and self.baseline_200 is None:
+            self.baseline_200 = content_length
+        elif response_status == 404 and self.baseline_404 is None:
+            self.baseline_404 = content_length
+
+        # Nếu status code rõ ràng -> block
         if response_status in [403, 406, 429, 501, 503]:
             return True
-        
-        # Content-based detection
-        content_lower = response_content.lower()
-        for indicator in self.waf_indicators:
-            if indicator in content_lower:
-                #print("check...", indicator)
+
+        # # Nếu chứa từ khóa chỉ báo WAF
+        # content_lower = response_content.lower()
+        # for indicator in self.waf_indicators:
+        #     if indicator in content_lower:
+        #         return True
+
+        # Nếu có baseline → so sánh độ dài
+        if self.baseline_200 and response_status == 200:
+            diff = abs(content_length - self.baseline_200) / max(self.baseline_200, 1)
+            if diff > self.content_size_threshold:
                 return True
-        
-        # Suspiciously fast response (might indicate immediate blocking)
+
+        if self.baseline_404 and response_status not in [200, 404]:
+            diff = abs(content_length - self.baseline_404) / max(self.baseline_404, 1)
+            if diff > self.content_size_threshold:
+                return True
+
+        # (tùy chọn) Nếu response quá nhanh mà không phải 200 (block tức thì)
         # if response_time < 0.02 and response_status != 200:
         #     return True
-        
+
         return False
+
     
     def should_bypass_token(self, token: str) -> bool:
         """Check if token is likely to be blocked"""
@@ -265,7 +285,7 @@ class BypassWAF:
         comment_type = kwargs.get('type', '/**/')
         
         # Insert comments between characters of keywords
-        keywords = ['SELECT', 'UNION', 'INSERT', 'UPDATE', 'DELETE', 'WHERE']
+        keywords = self.blocked_keywords
         
         result = payload
         for keyword in keywords:

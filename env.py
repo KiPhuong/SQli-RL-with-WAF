@@ -399,7 +399,7 @@ class SQLiEnvironment:
         """Determine if episode should end"""
         return (self.step_count >= self.max_steps or
                 self._detect_sqli_success(response) or
-                len(self.current_payload) >= 200)
+                len(self.current_payload) >= 500)
     
     def get_state_size(self) -> int:
         """Get state size"""
