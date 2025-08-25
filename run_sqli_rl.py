@@ -55,7 +55,7 @@ Examples:
     # Optional arguments
     parser.add_argument(
         '--injection-point', 
-        default='1',
+        default='-1',
         help='Base value to inject after (default: 1). Final URL will be: url?param=injection_point+payload'
     )
     

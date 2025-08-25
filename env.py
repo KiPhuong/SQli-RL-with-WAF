@@ -223,7 +223,7 @@ class SQLiEnvironment:
         """Build injection value with proper SQL syntax"""
         if not payload.strip():
             return self.injection_point
-        return f"{self.injection_point} {payload}"
+        return f"{self.injection_point}{payload}"
 
         # # Determine injection context based on payload content
         # payload_upper = payload.upper()

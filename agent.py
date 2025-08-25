@@ -80,7 +80,7 @@ class SQLiRLAgent:
         print(f"   Input: {state_size} → Hidden: {self.config['hidden_sizes']} → Output: {action_size}")
 
         # Token handling
-        self.start_tokens = ['SELECT','WITH','INSERT','UPDATE','DELETE','VALUES', "'", '"', '(', '1', '0', 'NULL', '--', '/*', '#', 'OR', 'UNION'] # Có thể điều chỉnh
+        self.start_tokens = ['SPACE'] # Có thể điều chỉnh
         
         self.token_list = self._get_token_list()
         self.token_to_id = {token: idx for idx, token in enumerate(self.token_list)}
@@ -88,15 +88,11 @@ class SQLiRLAgent:
         self.start_token_ids = [self.token_to_id[token] for token in self.start_tokens if token in self.token_to_id]
         self.transition_table = self._build_transition_table("sqli-misc.txt")
         
-        # print(f"token list value: {self.token_list}")
-        # print(f"token to id value: {self.token_to_id}")
-        # print(f"start token ids value: {self.start_token_ids}")
-
-        # missing = [token for token in self.start_tokens if token not in self.token_to_id]
-        # if missing:
-        #     print("[WARN] Missing start tokens:", missing)
-        # else:
-        #     print("[INFO] All start tokens found!")s
+        # print(f"Token_list: {self.token_list}")
+        # print(f"Token_to_id: {self.token_to_id}")
+        # print(f"id_to_token: {self.id_to_token}")
+        # print(f"Start_token_ids: {self.start_token_ids}")
+        #self.print_transition_table(self.transition_table)
 
         # Networks
         self.q_network = DQN(state_size, action_size, self.config['hidden_sizes'])
@@ -115,6 +111,8 @@ class SQLiRLAgent:
         self.step_count = 0
         self.update_target_network()
 
+        print("Agent id:", id(self), "Transition table keys:", list(self.transition_table.keys())[:5])
+
     def _calculate_hidden_sizes(self, state_size: int, action_size: int) -> List[int]:
         if action_size <= 100:
             return [512, 256, 128]
@@ -131,22 +129,29 @@ class SQLiRLAgent:
 
     def _build_transition_table(self, filename):
         """
-        Xây dựng bảng chuyển tiếp token từ file sqli_misc.txt, giữ cả dấu cách là token.
+        Xây dựng bảng chuyển tiếp token từ file sqli_misc.txt, giữ cả dấu cách là token,
+        loại bỏ trùng lặp.
         """
         table = {}
         with open(filename, 'r', encoding='utf-8') as f:
             for line in f:
-
                 tokens = re.findall(r"\s+|[^\s]+", line.rstrip('\n'))
                 tokens = ['SPACE' if t == ' ' else t.upper() for t in tokens]
- 
                 for i in range(len(tokens) - 1):
                     prev_token = tokens[i]
                     next_token = tokens[i + 1]
                     if prev_token not in table:
                         table[prev_token] = []
-                    table[prev_token].append(next_token)
+                    if next_token not in table[prev_token]:
+                        table[prev_token].append(next_token)
         return table
+
+    def print_transition_table(self, table):
+        print(f"{'Prev Token':<25} {'Next Token':<15}")
+        print("-" * 40)
+        for prev_token, next_tokens in table.items():
+            for next_token in next_tokens:
+                print(f"{prev_token:<25} {next_token:<15}")
 
     def select_token(self, state: np.ndarray, step_idx: int = 0, prev_token: str = None) -> int:
         self.q_network.eval()
@@ -154,7 +159,9 @@ class SQLiRLAgent:
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
             q_values = self.q_network(state_tensor).cpu().numpy()[0]
 
-            mask = np.zeros_like(q_values)
+        mask = np.zeros_like(q_values)
+        freq_weights = np.ones_like(q_values)
+
         if step_idx == 0:
             for idx in self.start_token_ids:
                 mask[idx] = 1
@@ -174,7 +181,9 @@ class SQLiRLAgent:
         exp_q = np.exp(masked_q - np.max(masked_q))
         probs = exp_q / np.sum(exp_q)
         action = np.random.choice(len(q_values), p=probs)
+
         return action
+
 
 
     def get_q_values(self, state: np.ndarray) -> np.ndarray:

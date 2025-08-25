@@ -214,6 +214,7 @@ class SQLiRLTrainer:
         self.debug_logger.info(f"Max steps per episode: {self.config['max_steps_per_episode']}")
         self.debug_logger.info("=" * 80)
 
+
     def _run_episode(self, episode_num: int) -> tuple:
         """Run a single episode"""
         state = self.env.reset()
@@ -229,13 +230,13 @@ class SQLiRLTrainer:
             self.debug_logger.info(f"Initial state shape: {np.array(state).shape}")
             self.debug_logger.info(f"Initial state (first 10 tokens): {state[:10]}")
         step_idx = 0  
+        prev_token = None
         while True:
             step_count += 1
-
             # Agent selects action
 
-            action = self.agent.select_token(state, step_idx)
-
+            action = self.agent.select_token(state, step_idx, prev_token)
+            prev_token = self.agent.id_to_token.get(action, 'UNK')
             step_idx +=1
             # Get Q-values for debugging
             if self.config['debug_mode'] and self.debug_logger and step_count % self.config['debug_frequency'] == 0:

