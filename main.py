@@ -238,12 +238,27 @@ class SQLiRLTrainer:
             self.debug_logger.info(f"Initial state (first 10 tokens): {state[:10]}")
         step_idx = 0  
         prev_token = None
+        prev_prev_token = None
+        prev_token_id = None
+        prev_prev_token_id = None
         while True:
             step_count += 1
             # Agent selects action
 
-            action = self.agent.select_token(state, step_idx, prev_token)
-            prev_token = self.agent.id_to_token.get(action, 'UNK')
+            action = self.agent.select_token(state, step_idx, prev_token, prev_prev_token)
+
+            prev_prev_token_id = prev_token_id
+            prev_token_id = action
+
+
+            # Cập nhật token string dựa trên id
+            prev_prev_token = self.agent.id_to_token.get(prev_prev_token_id, None)
+            prev_token = self.agent.id_to_token.get(prev_token_id, None)
+
+            # print("Prev_prev_token in main: ", prev_prev_token)
+            # print("Prev_prev in main: ", prev_token)
+            # print("Action in main: ", action)
+
             step_idx +=1
             # Get Q-values for debugging
             if self.config['debug_mode'] and self.debug_logger and step_count % self.config['debug_frequency'] == 0:

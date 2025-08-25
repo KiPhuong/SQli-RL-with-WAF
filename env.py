@@ -180,9 +180,9 @@ class SQLiEnvironment:
                 f.write(f"Response (preview): {response.get('content', '')[:1000]}\n")
                 f.write("="*60 + "\n")
         
-        # print("Action selected: ", token_name)
-        # print("Current payload", self.current_payload)
-        # print("Final url", final_url)
+        print("Action selected: ", token_name)
+        print("Current payload", self.current_payload)
+        print("Final url", final_url)
 
         return self.current_state, reward, done, info
     

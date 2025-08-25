@@ -200,7 +200,7 @@ class SQLiRLAgent:
 
     #     return action
 
-    def select_token(self, state: np.ndarray, step_idx: int = 0, prev_token: str = None) -> int:
+    def select_token(self, state: np.ndarray, step_idx: int = 0, prev_token: str = None, prev_prev_token: str = None) -> int:
         self.q_network.eval()
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
@@ -212,9 +212,9 @@ class SQLiRLAgent:
         if step_idx == 0:
             for idx in self.start_token_ids:
                 mask[idx] = 1
-        elif prev_token == "SPACE" and prev_token in self.transition_table_noSpace:
+        elif prev_token == "SPACE" and prev_prev_token in self.transition_table_noSpace:
             # Nếu prev_token là SPACE, dùng transition_table_noSpace
-            for token in self.transition_table_noSpace[prev_token]:
+            for token in self.transition_table_noSpace[prev_prev_token]:
                 idx = self.token_to_id.get(token)
                 if idx is not None:
                     mask[idx] = 1
@@ -234,6 +234,9 @@ class SQLiRLAgent:
         probs = exp_q / np.sum(exp_q)
         action = np.random.choice(len(q_values), p=probs)
 
+        # print("Prev_prev_token in agent: ", prev_prev_token)
+        # print("Prev_prev in agent: ", prev_token)
+        # print("Action in agent: ", action)
         return action
 
 
