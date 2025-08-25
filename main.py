@@ -43,7 +43,8 @@ class SQLiRLTrainer:
             'model_save_path': 'models/',
             'log_save_path': 'logs/',
             'debug_mode': True,  # Enable debug output
-            'debug_frequency': 1  # Debug every N steps
+            'debug_frequency': 1,  # Debug every N steps
+            'resume_from_model': None,  # hoặc None nếu không muốn load
         }
         
         self.config = {**default_config, **(config or {})}
@@ -121,6 +122,12 @@ class SQLiRLTrainer:
     def train(self):
         """Main training loop"""
         print(f"\nStarting training for {self.config['num_episodes']} episodes...")
+        # Thêm đoạn này để load model nếu có
+        resume_path = self.config.get('retrain_model', None)
+        if resume_path:
+            print(f"🔄 Loading model weights from: {resume_path}")
+            self.agent.load_model(resume_path)
+
         
         best_reward = float('-inf')
         
@@ -271,7 +278,7 @@ class SQLiRLTrainer:
             # Environment step
             next_state, reward, done, info = self.env.step(action)
 
-            print(f"Current Payload: {self.env.current_payload}")
+            #print(f"Current Payload: {self.env.current_payload}")
             self.payloads.append(self.env.current_payload)
 
             # Debug bypass processing results

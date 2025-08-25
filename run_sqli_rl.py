@@ -151,6 +151,12 @@ Examples:
         help='Path to text file containing blocked keywords (one per line, overrides --blocked-keywords)'
     )
 
+    parser.add_argument(
+        '--retrain-model',
+        type=str,
+        help='Path to model file to resume training from (optional)'
+    )    
+
     return parser.parse_args()
 
 
@@ -190,7 +196,8 @@ def main():
         'debug_frequency': args.debug_freq,
         'model_save_path': args.model_path,
         'log_save_path': args.log_path,
-        'blocked_keywords': blocked_keywords
+        'blocked_keywords': blocked_keywords,
+        'retrain_model': args.retrain_model,
     }
     
     # Display configuration

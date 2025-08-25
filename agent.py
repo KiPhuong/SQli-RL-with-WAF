@@ -87,12 +87,13 @@ class SQLiRLAgent:
         self.id_to_token = {idx: token for idx, token in enumerate(self.token_list)}
         self.start_token_ids = [self.token_to_id[token] for token in self.start_tokens if token in self.token_to_id]
         self.transition_table = self._build_transition_table("sqli-misc.txt")
+        self.transition_table_noSpace = self._build_transition_table_no_space("sqli-misc.txt")
         
         # print(f"Token_list: {self.token_list}")
         # print(f"Token_to_id: {self.token_to_id}")
         # print(f"id_to_token: {self.id_to_token}")
         # print(f"Start_token_ids: {self.start_token_ids}")
-        #self.print_transition_table(self.transition_table)
+        #self.print_transition_table(self.transition_table_noSpace)
 
         # Networks
         self.q_network = DQN(state_size, action_size, self.config['hidden_sizes'])
@@ -110,8 +111,6 @@ class SQLiRLAgent:
         self.memory = deque(maxlen=self.config['memory_size'])
         self.step_count = 0
         self.update_target_network()
-
-        print("Agent id:", id(self), "Transition table keys:", list(self.transition_table.keys())[:5])
 
     def _calculate_hidden_sizes(self, state_size: int, action_size: int) -> List[int]:
         if action_size <= 100:
@@ -145,6 +144,24 @@ class SQLiRLAgent:
                     if next_token not in table[prev_token]:
                         table[prev_token].append(next_token)
         return table
+    def _build_transition_table_no_space(self, filename):
+        """
+        Xây dựng bảng chuyển tiếp token từ file, BỎ QUA token là SPACE.
+        """
+        table = {}
+        with open(filename, 'r', encoding='utf-8') as f:
+            for line in f:
+                tokens = re.findall(r"\s+|[^\s]+", line.rstrip('\n'))
+                # Bỏ qua token là dấu cách
+                tokens = [t.upper() for t in tokens if t != ' ']
+                for i in range(len(tokens) - 1):
+                    prev_token = tokens[i]
+                    next_token = tokens[i + 1]
+                    if prev_token not in table:
+                        table[prev_token] = []
+                    if next_token not in table[prev_token]:
+                        table[prev_token].append(next_token)
+        return table
 
     def print_transition_table(self, table):
         print(f"{'Prev Token':<25} {'Next Token':<15}")
@@ -152,6 +169,36 @@ class SQLiRLAgent:
         for prev_token, next_tokens in table.items():
             for next_token in next_tokens:
                 print(f"{prev_token:<25} {next_token:<15}")
+
+    # def select_token(self, state: np.ndarray, step_idx: int = 0, prev_token: str = None) -> int:
+    #     self.q_network.eval()
+    #     with torch.no_grad():
+    #         state_tensor = torch.FloatTensor(state).unsqueeze(0)
+    #         q_values = self.q_network(state_tensor).cpu().numpy()[0]
+
+    #     mask = np.zeros_like(q_values)
+
+    #     if step_idx == 0:
+    #         for idx in self.start_token_ids:
+    #             mask[idx] = 1
+    #     elif prev_token and prev_token in self.transition_table:
+    #         for token in self.transition_table[prev_token]:
+    #             idx = self.token_to_id.get(token)
+    #             if idx is not None:
+    #                 mask[idx] = 1
+    #     else:
+    #         mask[:] = 1  # không match mapping → cho tất cả hợp lệ
+
+    #     # Nếu không có action nào hợp lệ, fallback cho phép tất cả
+    #     if np.sum(mask) == 0:
+    #         mask[:] = 1
+
+    #     masked_q = np.where(mask, q_values, -np.inf)
+    #     exp_q = np.exp(masked_q - np.max(masked_q))
+    #     probs = exp_q / np.sum(exp_q)
+    #     action = np.random.choice(len(q_values), p=probs)
+
+    #     return action
 
     def select_token(self, state: np.ndarray, step_idx: int = 0, prev_token: str = None) -> int:
         self.q_network.eval()
@@ -165,6 +212,12 @@ class SQLiRLAgent:
         if step_idx == 0:
             for idx in self.start_token_ids:
                 mask[idx] = 1
+        elif prev_token == "SPACE" and prev_token in self.transition_table_noSpace:
+            # Nếu prev_token là SPACE, dùng transition_table_noSpace
+            for token in self.transition_table_noSpace[prev_token]:
+                idx = self.token_to_id.get(token)
+                if idx is not None:
+                    mask[idx] = 1
         elif prev_token and prev_token in self.transition_table:
             for token in self.transition_table[prev_token]:
                 idx = self.token_to_id.get(token)
@@ -173,7 +226,6 @@ class SQLiRLAgent:
         else:
             mask[:] = 1  # không match mapping → cho tất cả hợp lệ
 
-        # Nếu không có action nào hợp lệ, fallback cho phép tất cả
         if np.sum(mask) == 0:
             mask[:] = 1
 
