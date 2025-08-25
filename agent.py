@@ -8,6 +8,7 @@ from collections import deque
 from typing import List, Tuple, Dict, Any
 from env import SQLiEnvironment
 from gen_action import ActionSpace
+import re
 
 class DQN(nn.Module):
     """Deep Q-Network for token selection"""
@@ -130,19 +131,21 @@ class SQLiRLAgent:
 
     def _build_transition_table(self, filename):
         """
-        Xây dựng bảng chuyển tiếp token từ file sqli_misc.txt
+        Xây dựng bảng chuyển tiếp token từ file sqli_misc.txt, giữ cả dấu cách là token.
         """
         table = {}
         with open(filename, 'r', encoding='utf-8') as f:
             for line in f:
-                tokens = [t.upper() for t in line.strip().split()]
+
+                tokens = re.findall(r"\s+|[^\s]+", line.rstrip('\n'))
+                tokens = ['SPACE' if t == ' ' else t.upper() for t in tokens]
+ 
                 for i in range(len(tokens) - 1):
                     prev_token = tokens[i]
                     next_token = tokens[i + 1]
                     if prev_token not in table:
                         table[prev_token] = []
                     table[prev_token].append(next_token)
-        #print(f"Mapping table: {table}")
         return table
 
     def select_token(self, state: np.ndarray, step_idx: int = 0, prev_token: str = None) -> int:

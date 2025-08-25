@@ -85,6 +85,9 @@ class SQLiEnvironment:
         # Get original token
         original_token = self.gen_action.payload_generator.token_to_text(action)
         token_name = self.gen_action.get_token_name(action)
+        
+        
+
 
         # Check if token should be bypassed
         should_bypass = self.bypass_waf.should_bypass_token(original_token)
@@ -102,7 +105,7 @@ class SQLiEnvironment:
 
         # Update payload by appending processed token
         if self.current_payload:
-            self.current_payload += " " + processed_token
+            self.current_payload += processed_token
         else:
             self.current_payload = processed_token
         
@@ -174,6 +177,10 @@ class SQLiEnvironment:
                 f.write(f"Bypass method: {info.get('bypass_method', 'None')}\n")
                 f.write(f"Response (preview): {response.get('content', '')[:1000]}\n")
                 f.write("="*60 + "\n")
+        
+        print("Action selected: ", token_name)
+        print("Current payload", self.current_payload)
+        print("Final url", final_url)
 
         return self.current_state, reward, done, info
     
@@ -216,42 +223,43 @@ class SQLiEnvironment:
         """Build injection value with proper SQL syntax"""
         if not payload.strip():
             return self.injection_point
+        return f"{self.injection_point} {payload}"
 
-        # Determine injection context based on payload content
-        payload_upper = payload.upper()
+        # # Determine injection context based on payload content
+        # payload_upper = payload.upper()
 
-        # For UNION-based injections
-        if 'UNION' in payload_upper and 'SELECT' in payload_upper:
-            return f"{self.injection_point} {payload}"
+        # # For UNION-based injections
+        # if 'UNION' in payload_upper and 'SELECT' in payload_upper:
+        #     return f"{self.injection_point} {payload}"
 
-        # For boolean-based injections (AND/OR)
-        elif any(keyword in payload_upper for keyword in ['AND', 'OR']) and not payload.startswith(('AND', 'OR')):
-            return f"{self.injection_point} {payload}"
+        # # For boolean-based injections (AND/OR)
+        # elif any(keyword in payload_upper for keyword in ['AND', 'OR']) and not payload.startswith(('AND', 'OR')):
+        #     return f"{self.injection_point} {payload}"
 
-        # For error-based injections
-        elif any(func in payload_upper for func in ['EXTRACTVALUE', 'UPDATEXML', 'XMLTYPE']):
-            return f"{self.injection_point} AND {payload}"
+        # # For error-based injections
+        # elif any(func in payload_upper for func in ['EXTRACTVALUE', 'UPDATEXML', 'XMLTYPE']):
+        #     return f"{self.injection_point} AND {payload}"
 
-        # For time-based injections
-        elif any(func in payload_upper for func in ['SLEEP', 'WAITFOR', 'BENCHMARK']):
-            return f"{self.injection_point} AND {payload}"
+        # # For time-based injections
+        # elif any(func in payload_upper for func in ['SLEEP', 'WAITFOR', 'BENCHMARK']):
+        #     return f"{self.injection_point} AND {payload}"
 
-        # For string-based injections (quotes)
-        elif "'" in payload:
-            # Try different quote contexts
-            if payload.startswith("'"):
-                return f"{self.injection_point}{payload}"  # ?id=1'...
-            else:
-                return f"{self.injection_point}' {payload}"  # ?id=1' ...
+        # # For string-based injections (quotes)
+        # elif "'" in payload:
+        #     # Try different quote contexts
+        #     if payload.startswith("'"):
+        #         return f"{self.injection_point}{payload}"  # ?id=1'...
+        #     else:
+        #         return f"{self.injection_point}' {payload}"  # ?id=1' ...
 
-        # For comment-based injections
-        elif payload.startswith('--') or payload.startswith('/*'):
-            return f"{self.injection_point} {payload}"
+        # # For comment-based injections
+        # elif payload.startswith('--') or payload.startswith('/*'):
+        #     return f"{self.injection_point} {payload}"
 
-        # For numeric injections (default)
-        else:
-            # Add space for readability
-            return f"{self.injection_point} {payload}"
+        # # For numeric injections (default)
+        # else:
+        #     # Add space for readability
+        
     
     def _send_request_to_url(self, url: str) -> Dict[str, Any]:
         """Send HTTP request to URL"""
@@ -267,9 +275,10 @@ class SQLiEnvironment:
                     params = urllib.parse.parse_qs(parsed.query)
                     payload_value = params.get(self.parameter, [''])[0]
                     data = {self.parameter: payload_value}
+                    
                 else:
                     data = {self.parameter: self.injection_point}
-                
+                print(f"[DEBUG] Sending POST request: {self.target_url} | data={data}")
                 response = self.session.post(self.target_url, data=data, timeout=self.timeout, allow_redirects=False)
             
             response_time = time.time() - start_time
@@ -347,7 +356,10 @@ class SQLiEnvironment:
         
         # High reward for SQL injection success
         if self._detect_sqli_success(response):
-            return 2.0
+            bonus = 0
+            if re.search(r"flag\{.*?\}|ctf\{.*?\}|root@localhost|version\(|user\(", content, re.I):
+                bonus = 1.0
+            return 2.0 + bonus
         
         # Enhanced reward for SQL errors
         if error_info['has_error']:
@@ -375,6 +387,10 @@ class SQLiEnvironment:
         if self._is_response_different(response):
             return 0.1
         
+        if len(payload) > 400:
+            return -0.2
+
+
         return 0.0
     
     def _detect_sqli_success(self, response: Dict[str, Any]) -> bool:

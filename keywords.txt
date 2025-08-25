@@ -12,7 +12,7 @@ LIKE
 IN
 BETWEEN
 IS
-IS NULL
+NULL
 +
 -
 *
@@ -61,3 +61,4 @@ AS
 10
 VERSION()
 USER()
+SPACE

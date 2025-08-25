@@ -235,7 +235,7 @@ class SQLiRLTrainer:
             # Agent selects action
 
             action = self.agent.select_token(state, step_idx)
-            
+
             step_idx +=1
             # Get Q-values for debugging
             if self.config['debug_mode'] and self.debug_logger and step_count % self.config['debug_frequency'] == 0:
@@ -269,6 +269,8 @@ class SQLiRLTrainer:
 
             # Environment step
             next_state, reward, done, info = self.env.step(action)
+
+            print(f"Current Payload: {self.env.current_payload}")
             self.payloads.append(self.env.current_payload)
 
             # Debug bypass processing results
