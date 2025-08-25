@@ -126,6 +126,8 @@ class SQLiEnvironment:
         error_info = self._detect_sql_error(response['content'])
         reward = self._calculate_reward(response, self.current_payload, error_info)
 
+        #print("Reward: ", reward)
+
         # Build new state using SimpleStateManager
         self.current_state = self.state_manager.build_state(
             current_payload=self.current_payload,
@@ -354,23 +356,19 @@ class SQLiEnvironment:
         content = response.get('content', '')
         response_time = response.get('response_time', 0)
         
+        bonus = 0
         # High reward for SQL injection success
         if self._detect_sqli_success(response):
-            bonus = 0
             if re.search(r"flag\{.*?\}|ctf\{.*?\}|root@localhost|version\(|user\(", content, re.I):
                 bonus = 1.0
             return 2.0 + bonus
         
         # Enhanced reward for SQL errors
-        if error_info['has_error']:
-            base_reward = 0.5
-            if error_info['database_type'] != 'unknown':
-                base_reward += 0.2
-            if error_info['column_names']:
-                base_reward += 0.3
-            if error_info['table_names']:
-                base_reward += 0.2
-            return min(base_reward, 0.9)
+        if "syntax" in content:
+            return -1.0
+        else:
+            bonus = 0.5
+        
             # Reward khi bypass thành công
         if response.get('bypass_applied', False) and not response.get('is_blocked', False):
             return 0.5
@@ -390,8 +388,7 @@ class SQLiEnvironment:
         if len(payload) > 400:
             return -0.2
 
-
-        return 0.0
+        return 0.0 + bonus
     
     def _detect_sqli_success(self, response: Dict[str, Any]) -> bool:
         """Detect likely SQL injection success"""
