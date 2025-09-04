@@ -89,11 +89,10 @@ class SQLiRLAgent:
         self.transition_table = self._build_transition_table("sqli-misc.txt")
         self.transition_table_noSpace = self._build_transition_table_no_space("sqli-misc.txt")
         
-        # print(f"Token_list: {self.token_list}")
-        # print(f"Token_to_id: {self.token_to_id}")
-        # print(f"id_to_token: {self.id_to_token}")
-        # print(f"Start_token_ids: {self.start_token_ids}")
-        #self.print_transition_table(self.transition_table_noSpace)
+        # print(f"[DEBUG in agent] Transition table: ")
+        # self.print_transition_table(self.transition_table)
+        # print(f"[DEBUG in agent] Transition table noSpace: ")
+        # self.print_transition_table(self.transition_table_noSpace)
 
         # Networks
         self.q_network = DQN(state_size, action_size, self.config['hidden_sizes'])
@@ -111,6 +110,7 @@ class SQLiRLAgent:
         self.memory = deque(maxlen=self.config['memory_size'])
         self.step_count = 0
         self.update_target_network()
+
 
     def _calculate_hidden_sizes(self, state_size: int, action_size: int) -> List[int]:
         if action_size <= 100:
@@ -134,8 +134,12 @@ class SQLiRLAgent:
         table = {}
         with open(filename, 'r', encoding='utf-8') as f:
             for line in f:
-                tokens = re.findall(r"\s+|[^\s]+", line.rstrip('\n'))
-                tokens = ['SPACE' if t == ' ' else t.upper() for t in tokens]
+                #tokens = re.findall(r"\s+|,|[^\s,]+,--|#|'.*?'|\w+|\d+|[(),]", line.rstrip('\n'))
+                #tokens = ['SPACE' if t == ' ' else t.upper() for t in tokens]
+                tokens = [("SPACE" if re.fullmatch(r"\s+", t) else t.upper())
+                    for t in re.findall(
+                    r"--.*?$|#.*?$|'.*?'|\s+|\d+|[A-Za-z_][A-Za-z0-9_]*|[(),]", line,flags=re.MULTILINE)
+                ]
                 for i in range(len(tokens) - 1):
                     prev_token = tokens[i]
                     next_token = tokens[i + 1]
@@ -151,9 +155,14 @@ class SQLiRLAgent:
         table = {}
         with open(filename, 'r', encoding='utf-8') as f:
             for line in f:
-                tokens = re.findall(r"\s+|[^\s]+", line.rstrip('\n'))
+                #tokens = re.findall(r"\s+|,|[^\s,]+,--|#|'.*?'|\w+|\d+|[(),]", line.rstrip('\n'))
+                tokens = [("SPACE" if re.fullmatch(r"\s+", t) else t.upper())
+                    for t in re.findall(
+                    r"--.*?$|#.*?$|'.*?'|\s+|\d+|[A-Za-z_][A-Za-z0-9_]*|[(),]", line,flags=re.MULTILINE)
+                ]
                 # Bỏ qua token là dấu cách
-                tokens = [t.upper() for t in tokens if t != ' ']
+                #tokens = [t.upper() for t in tokens if t != ' ']
+                tokens = [t for t in tokens if t != "SPACE"]
                 for i in range(len(tokens) - 1):
                     prev_token = tokens[i]
                     next_token = tokens[i + 1]
@@ -162,6 +171,7 @@ class SQLiRLAgent:
                     if next_token not in table[prev_token]:
                         table[prev_token].append(next_token)
         return table
+        
 
     def print_transition_table(self, table):
         print(f"{'Prev Token':<25} {'Next Token':<15}")
@@ -207,7 +217,6 @@ class SQLiRLAgent:
             q_values = self.q_network(state_tensor).cpu().numpy()[0]
 
         mask = np.zeros_like(q_values)
-        freq_weights = np.ones_like(q_values)
 
         if step_idx == 0:
             for idx in self.start_token_ids:
@@ -234,9 +243,9 @@ class SQLiRLAgent:
         probs = exp_q / np.sum(exp_q)
         action = np.random.choice(len(q_values), p=probs)
 
-        # print("Prev_prev_token in agent: ", prev_prev_token)
-        # print("Prev_prev in agent: ", prev_token)
-        # print("Action in agent: ", action)
+        
+
+        print(f"[DEBUG in agent] Prev_prev_token: {str(prev_prev_token):<10} || Prve_token: {str(prev_token):<10} || Action selected: {self.id_to_token.get(action)}")
         return action
 
 

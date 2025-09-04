@@ -142,6 +142,9 @@ class SQLiEnvironment:
 
         # Check if episode is done
         done = self._is_episode_done(response)
+
+        if done: 
+            print(f"[DEBUG in env] Final Payload: {self.current_payload}")
         
         # Prepare info
         info = {
@@ -173,16 +176,47 @@ class SQLiEnvironment:
             'info': info
         })
         
+        # if info['sqli_detected']:
+        #     with open("sqli_success_log.txt", "a", encoding="utf-8") as f:
+        #         f.write(f"Payload: {self.current_payload}\n")
+        #         f.write(f"Bypass method: {info.get('bypass_method', 'None')}\n")
+        #         f.write(f"Response (preview): {response.get('content', '')[:1000]}\n")
+        #         f.write("="*60 + "\n")
+
         if info['sqli_detected']:
+            content = response.get('content', '')
+
+            # Trích xuất Item ID
+            item_id_match = re.search(
+                r'<b><u><i>Item ID:</i></u></b>\s*([0-9A-Za-z]+)', 
+                content, re.IGNORECASE
+            )
+            item_id = item_id_match.group(1) if item_id_match else 'N/A'
+
+            # Trích xuất Price
+            price_match = re.search(
+                r'<b><u><i>Price:</i></u></b>\s*([0-9A-Za-z$]+)', 
+                content, re.IGNORECASE
+            )
+            price = price_match.group(1) if price_match else 'N/A'
+
+            # Trích xuất email (data-cfemail)
+            email_match = re.search(r'data-cfemail="([^"]+)"', content)
+            email_cf = email_match.group(1) if email_match else 'N/A'
+
             with open("sqli_success_log.txt", "a", encoding="utf-8") as f:
                 f.write(f"Payload: {self.current_payload}\n")
                 f.write(f"Bypass method: {info.get('bypass_method', 'None')}\n")
-                f.write(f"Response (preview): {response.get('content', '')[:1000]}\n")
+                f.write(f"Item ID: {item_id}\n")
+                f.write(f"Price: {price}\n")
+                f.write(f"Email (cfemail): {email_cf}\n")
                 f.write("="*60 + "\n")
+
         
         # print("Action selected: ", token_name)
         # print("Current payload", self.current_payload)
         # print("Final url", final_url)
+
 
         return self.current_state, reward, done, info
     
@@ -367,7 +401,8 @@ class SQLiEnvironment:
         if "syntax" in content:
             return -1.0
         else:
-            bonus = 0.5
+            #bonus = 0.1
+            return -0.2
         
             # Reward khi bypass thành công
         if response.get('bypass_applied', False) and not response.get('is_blocked', False):
@@ -427,9 +462,11 @@ class SQLiEnvironment:
     
     def _is_episode_done(self, response: Dict[str, Any]) -> bool:
         """Determine if episode should end"""
-        return (self.step_count >= self.max_steps or
-                self._detect_sqli_success(response) or
-                len(self.current_payload) >= 500)
+        has_comment = any(c in self.current_payload for c in ["--"])
+        return (self.step_count >= self.max_steps 
+                or self._detect_sqli_success(response) 
+                or len(self.current_payload) >= 500  
+                or has_comment)
     
     def get_state_size(self) -> int:
         """Get state size"""
