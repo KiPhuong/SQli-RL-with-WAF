@@ -86,11 +86,12 @@ class SQLiEnvironment:
         original_token = self.gen_action.payload_generator.token_to_text(action)
         token_name = self.gen_action.get_token_name(action)
         
+
         
 
 
         # Check if token should be bypassed
-        should_bypass = self.bypass_waf.should_bypass_token(original_token)
+        should_bypass = self.bypass_waf.should_bypass_token(token_name)
         processed_token = original_token
         bypass_info = None
 
@@ -98,6 +99,8 @@ class SQLiEnvironment:
         if should_bypass:
             for method in self.bypass_waf.get_available_methods():
                 bypass_result = self.bypass_waf.apply_bypass_to_token(original_token, method=method)
+                print(f"[DEBUG in ENV] Method bypass is {method} and bypass_result is {bypass_result}")
+                
                 if bypass_result['success']:
                     processed_token = bypass_result['bypassed']
                     bypass_info = bypass_result
@@ -108,7 +111,8 @@ class SQLiEnvironment:
             self.current_payload += processed_token
         else:
             self.current_payload = processed_token
-        
+
+
         # Build final URL
         final_url = self._build_injection_url(self.current_payload)
 

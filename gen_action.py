@@ -241,6 +241,10 @@ class GenAction:
     def get_token_name(self, token_id: int) -> str:
         """Get token name by ID"""
         return self.action_space.get_token_by_id(token_id)
+    
+    def get_token_id(self, token: int) -> str:
+        """Get token name by ID"""
+        return self.action_space.get_id_by_token(token)
 
     def get_state_debug_info(self, state: np.ndarray) -> Dict[str, Any]:
         """Get detailed debug information about current state"""

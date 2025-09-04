@@ -243,10 +243,14 @@ class SQLiRLTrainer:
         prev_prev_token_id = None
         while True:
             step_count += 1
-            # Agent selects action
 
+            #Print q value at state 
+            #print(self.agent.get_q_values(state))
+
+            # Agent selects action
             action = self.agent.select_token(state, step_idx, prev_token, prev_prev_token)
 
+            #Get ID of 2 previous action
             prev_prev_token_id = prev_token_id
             prev_token_id = action
 
@@ -255,9 +259,6 @@ class SQLiRLTrainer:
             prev_prev_token = self.agent.id_to_token.get(prev_prev_token_id, None)
             prev_token = self.agent.id_to_token.get(prev_token_id, None)
 
-            # print("Prev_prev_token in main: ", prev_prev_token)
-            # print("Prev_prev in main: ", prev_token)
-            # print("Action in main: ", action)
 
             step_idx +=1
             # Get Q-values for debugging

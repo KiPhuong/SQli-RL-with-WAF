@@ -80,7 +80,7 @@ class SQLiRLAgent:
         print(f"   Input: {state_size} → Hidden: {self.config['hidden_sizes']} → Output: {action_size}")
 
         # Token handling
-        self.start_tokens = ['SPACE'] # Có thể điều chỉnh
+        self.start_tokens = ['SPACE', 'UNION', 'SELECT', '1'] # Có thể điều chỉnh
         
         self.token_list = self._get_token_list()
         self.token_to_id = {token: idx for idx, token in enumerate(self.token_list)}
@@ -88,6 +88,10 @@ class SQLiRLAgent:
         self.start_token_ids = [self.token_to_id[token] for token in self.start_tokens if token in self.token_to_id]
         self.transition_table = self._build_transition_table("sqli-misc.txt")
         self.transition_table_noSpace = self._build_transition_table_no_space("sqli-misc.txt")
+
+        # Precompute unions to be used as reasonable fallbacks (giữ giới hạn trong corpus thay vì 'mọi token')
+        self.union_next_no_space = self._compute_union(self.transition_table_noSpace)
+        self.union_next_all = self._compute_union(self.transition_table)
         
         # print(f"[DEBUG in agent] Transition table: ")
         # self.print_transition_table(self.transition_table)
@@ -210,44 +214,194 @@ class SQLiRLAgent:
 
     #     return action
 
+    # def select_token(self, state: np.ndarray, step_idx: int = 0, prev_token: str = None, prev_prev_token: str = None) -> int:
+    #     self.q_network.eval()
+    #     with torch.no_grad():
+    #         state_tensor = torch.FloatTensor(state).unsqueeze(0)
+    #         q_values = self.q_network(state_tensor).cpu().numpy()[0]
+
+    #     mask = np.zeros_like(q_values)
+
+    #     if step_idx == 0:
+    #         for idx in self.start_token_ids:
+    #             mask[idx] = 1
+    #     elif prev_token == "SPACE" and prev_prev_token in self.transition_table_noSpace:
+    #         # Nếu prev_token là SPACE, dùng transition_table_noSpace
+    #         for token in self.transition_table_noSpace[prev_prev_token]:
+    #             idx = self.token_to_id.get(token)
+    #             if idx is not None:
+    #                 mask[idx] = 1
+    #     elif prev_token and prev_token in self.transition_table:
+    #         for token in self.transition_table[prev_token]:
+    #             idx = self.token_to_id.get(token)
+    #             if idx is not None:
+    #                 mask[idx] = 1
+    #     else:
+    #         mask[:] = 1  # không match mapping → cho tất cả hợp lệ
+
+    #     if np.sum(mask) == 0:
+    #         mask[:] = 1
+
+    #     # masked_q = np.where(mask, q_values, -np.inf)
+    #     # exp_q = np.exp(masked_q - np.max(masked_q))
+    #     # probs = exp_q / np.sum(exp_q)
+
+    #     masked_q = np.full_like(q_values, -np.inf)
+    #     masked_q[mask.astype(bool)] = q_values[mask.astype(bool)]
+
+    #     # tránh nan
+    #     if np.all(~np.isfinite(masked_q)):
+    #         masked_q = q_values  # fallback: cho phép tất cả
+
+    #     logits = (masked_q - np.nanmax(masked_q)) / max(self.exploration.temperature, 1e-6)
+    #     exp_q = np.exp(logits)
+    #     probs = exp_q / np.sum(exp_q)
+
+    #     action = np.random.choice(len(q_values), p=probs)
+    #     print(f"[DEBUG in agent] Q-values: \n {q_values}")
+    #     print(f"[DEBUG in agent] Probs Action: \n {probs}")
+    #     print(f"[DEBUG in agent] Prev_prev_token: {str(prev_prev_token):<10} || Prve_token: {str(prev_token):<10} || Action selected: {self.id_to_token.get(action)}")
+    #     return action
+
+        # --- helper: compute union of next tokens from a transition table ---
+    def _compute_union(self, table: Dict[str, List[str]]) -> set:
+        s = set()
+        for lst in table.values():
+            s.update(lst)
+        return s
+
+    def _tokens_to_ids(self, tokens_set: set) -> set:
+        ids = set()
+        for tok in tokens_set:
+            idx = self.token_to_id.get(tok)
+            if idx is not None:
+                ids.add(idx)
+        return ids
+
+    def _get_allowed_ids(self, step_idx: int, prev_token: str = None, prev_prev_token: str = None) -> set:
+        """
+        Trả về set các action ids hợp lệ dựa trên step_idx, prev_token, prev_prev_token.
+        Quy tắc:
+         - step_idx == 0: trả về start_token_ids (nếu rỗng -> fallback cấp phép tất cả nhưng warn)
+         - nếu prev_token == 'SPACE': nếu có prev_prev_token -> xem transition_table_noSpace[prev_prev_token]
+                                       ngược lại -> union_next_no_space (fallback, hạn chế trong corpus)
+         - nếu prev_token in transition_table -> dùng transition_table[prev_token]
+         - else -> fallback union_next_all (tập token xuất hiện trong corpus)
+        """
+        # Begin
+        if step_idx == 0:
+            allowed_ids = set(self.start_token_ids)
+            if len(allowed_ids) == 0:
+                # cực hiếm — cho phép tất cả nhưng báo
+                print("[WARN] start_token_ids empty — allowing all tokens as fallback")
+                return set(range(self.action_size))
+            return allowed_ids
+
+        # case prev_token is SPACE (we want next token that follows the token before SPACE)
+        if prev_token == "SPACE":
+            if prev_prev_token is not None and prev_prev_token in self.transition_table_noSpace:
+                allowed_tokens = set(self.transition_table_noSpace[prev_prev_token])
+            else:
+                # fallback: union of tokens that ever follow non-space tokens (hạn chế trong corpus)
+                allowed_tokens = set(self.union_next_no_space)
+        elif prev_token is not None and prev_token in self.transition_table:
+            allowed_tokens = set(self.transition_table[prev_token])
+        else:
+            # fallback: union of all next tokens observed in corpus
+            allowed_tokens = set(self.union_next_all)
+            # additionally include start tokens (optional)
+            allowed_tokens.update([self.id_to_token[i] for i in self.start_token_ids if i in self.id_to_token])
+
+        allowed_ids = self._tokens_to_ids(allowed_tokens)
+        if not allowed_ids:
+            # nếu vẫn không có token hợp lệ, fallback an toàn: cho phép tất cả
+            print("[WARN] Allowed token ids empty -> fallback to ALL actions")
+            allowed_ids = set(range(self.action_size))
+        return allowed_ids
+
+    def _masked_softmax(self, q_values: np.ndarray, mask_bool: np.ndarray) -> np.ndarray:
+        """
+        Softmax có mask, dùng temperature self.exploration.temperature và fallback nếu cần.
+        - q_values: shape (action_size,)
+        - mask_bool: boolean np array shape (action_size,) True=allowed
+        """
+        # Mảng logits: -inf ở chỗ không được phép
+        masked_q = np.full_like(q_values, -np.inf, dtype=float)
+        if mask_bool.any():
+            masked_q[mask_bool] = q_values[mask_bool]
+        else:
+            # fallback: allow all (rare)
+            masked_q = q_values.copy()
+
+        # kiểm tra phần tử hữu hạn
+        finite_mask = np.isfinite(masked_q)
+        if not finite_mask.any():
+            # không có giá trị hữu hạn → fallback uniform trên mask (nếu mask bool any) hoặc uniform global
+            if mask_bool.any():
+                probs = mask_bool.astype(float) / float(mask_bool.sum())
+            else:
+                probs = np.ones_like(q_values, dtype=float) / float(len(q_values))
+            return probs
+
+        # numeric stability: lấy max trên các giá trị hữu hạn
+        max_val = float(np.max(masked_q[finite_mask]))
+        T = max(self.exploration.temperature, 1e-6)
+        scaled = (masked_q - max_val) / T
+
+        exp_vals = np.zeros_like(scaled, dtype=float)
+        exp_vals[finite_mask] = np.exp(scaled[finite_mask])
+
+        sum_exp = float(np.sum(exp_vals))
+        if not np.isfinite(sum_exp) or sum_exp <= 0:
+            # fallback: uniform over mask_bool
+            if mask_bool.any():
+                probs = mask_bool.astype(float) / float(mask_bool.sum())
+            else:
+                probs = np.ones_like(q_values, dtype=float) / float(len(q_values))
+            return probs
+
+        probs = exp_vals / sum_exp
+        return probs
+
     def select_token(self, state: np.ndarray, step_idx: int = 0, prev_token: str = None, prev_prev_token: str = None) -> int:
+        """
+        Phiên bản đã chỉnh sửa: sử dụng helper _get_allowed_ids và _masked_softmax.
+        In debug info: q_values, probs, allowed_count.
+        """
         self.q_network.eval()
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
             q_values = self.q_network(state_tensor).cpu().numpy()[0]
 
-        mask = np.zeros_like(q_values)
+        # Build mask from allowed ids
+        allowed_ids = self._get_allowed_ids(step_idx, prev_token, prev_prev_token)
+        mask = np.zeros_like(q_values, dtype=bool)
+        mask[list(allowed_ids)] = True
 
-        if step_idx == 0:
-            for idx in self.start_token_ids:
-                mask[idx] = 1
-        elif prev_token == "SPACE" and prev_prev_token in self.transition_table_noSpace:
-            # Nếu prev_token là SPACE, dùng transition_table_noSpace
-            for token in self.transition_table_noSpace[prev_prev_token]:
-                idx = self.token_to_id.get(token)
-                if idx is not None:
-                    mask[idx] = 1
-        elif prev_token and prev_token in self.transition_table:
-            for token in self.transition_table[prev_token]:
-                idx = self.token_to_id.get(token)
-                if idx is not None:
-                    mask[idx] = 1
-        else:
-            mask[:] = 1  # không match mapping → cho tất cả hợp lệ
+        # Debug: log allowed count
+        allowed_count = int(mask.sum())
+        if allowed_count <= 1:
+            print(f"[WARN] Allowed actions count = {allowed_count} at step {step_idx} (prev_prev={prev_prev_token}, prev={prev_token})")
 
-        if np.sum(mask) == 0:
-            mask[:] = 1
+        # Softmax with mask and temperature
+        probs = self._masked_softmax(q_values, mask)
 
-        masked_q = np.where(mask, q_values, -np.inf)
-        exp_q = np.exp(masked_q - np.max(masked_q))
-        probs = exp_q / np.sum(exp_q)
+        # Final guard: numeric safety
+        if not np.isfinite(probs).all() or probs.sum() <= 0:
+            # uniform fallback
+            probs = mask.astype(float)
+            if probs.sum() == 0:
+                probs = np.ones_like(probs, dtype=float)
+            probs = probs / probs.sum()
+
         action = np.random.choice(len(q_values), p=probs)
 
-        
-
+        # Debug prints (giữ hoặc tắt tuỳ bạn)
+        print(f"[DEBUG in agent] Q-values: \n {q_values}")
+        print(f"[DEBUG in agent] Allowed count: {allowed_count}  | Mask sum: {mask.sum()}")
+        print(f"[DEBUG in agent] Probs Action: \n {probs}")
         print(f"[DEBUG in agent] Prev_prev_token: {str(prev_prev_token):<10} || Prve_token: {str(prev_token):<10} || Action selected: {self.id_to_token.get(action)}")
         return action
-
 
 
     def get_q_values(self, state: np.ndarray) -> np.ndarray:

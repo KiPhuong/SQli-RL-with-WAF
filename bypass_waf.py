@@ -73,13 +73,13 @@ class BypassWAF:
         """
         if blocked_keywords is None:
             # Use default keywords
-            keywords = default_keywords
-            print(f"🛡️ Using default blocked keywords: {len(keywords)} keywords")
+            keywords = default_keywords 
+            print(f"🛡️ Using default blocked keywords: {len(keywords)} keywords. Keywords are: {keywords}")
 
         elif isinstance(blocked_keywords, list):
             # Use provided list
             keywords = blocked_keywords
-            print(f"🛡️ Using custom blocked keywords: {len(keywords)} keywords")
+            print(f"🛡️ Using custom blocked keywords: {len(keywords)} keywords. Keywords are: {keywords}")
 
         elif isinstance(blocked_keywords, str):
             # Load from file
