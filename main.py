@@ -241,6 +241,7 @@ class SQLiRLTrainer:
         prev_prev_token = None
         prev_token_id = None
         prev_prev_token_id = None
+        last_actions = []
         while True:
             step_count += 1
 
@@ -249,6 +250,7 @@ class SQLiRLTrainer:
 
             # Agent selects action
             action = self.agent.select_token(state, step_idx, prev_token, prev_prev_token)
+            #last_actions.append(action)
 
             #Get ID of 2 previous action
             prev_prev_token_id = prev_token_id

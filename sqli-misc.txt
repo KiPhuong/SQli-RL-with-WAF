@@ -253,8 +253,6 @@ EXECUTE sp_add_job @job_name = 'TestJob';
 (select (select 1 - (select 1))) union all select 2 --
 (select 1 - (select 1 - (select 1))) union all select 2 --
 -1 union distinct select table_name from information_schema.tables
--1 union distinct all select table_name from information_schema.tables
--1 union all distinct select table_name from information_schema.tables
 -1 union all select table_name from information_schema.tables
 if(1=2, -1, 2) union select table_name from information_schema.tables limit 1
 true in(2, (select 2)) union select table_name from information_schema.tables limit 1

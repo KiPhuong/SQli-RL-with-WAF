@@ -99,7 +99,7 @@ class SQLiEnvironment:
         if should_bypass:
             for method in self.bypass_waf.get_available_methods():
                 bypass_result = self.bypass_waf.apply_bypass_to_token(original_token, method=method)
-                print(f"[DEBUG in ENV] Method bypass is {method} and bypass_result is {bypass_result}")
+                #print(f"[DEBUG in ENV] Method bypass is {method} and bypass_result is {bypass_result}")
                 
                 if bypass_result['success']:
                     processed_token = bypass_result['bypassed']
@@ -406,7 +406,7 @@ class SQLiEnvironment:
             return -1.0
         else:
             #bonus = 0.1
-            return -0.2
+            return -0.1
         
             # Reward khi bypass thành công
         if response.get('bypass_applied', False) and not response.get('is_blocked', False):
