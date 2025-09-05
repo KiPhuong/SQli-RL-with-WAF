@@ -50,6 +50,7 @@ class SQLiEnvironment:
         
         # Initialize baseline
         self._establish_baseline()
+        self.list_action = []
     
     def _establish_baseline(self):
         """Establish baseline response for comparison"""
@@ -78,18 +79,27 @@ class SQLiEnvironment:
 
         return self.current_state
     
+
+    def has_adjacent_duplicates(self) -> bool:
+        """
+        Kiểm tra xem trong list_action có 2 action liên tiếp trùng nhau không.
+        """
+        if len(self.list_action) < 2:
+            return False
+        return self.list_action[-1] == self.list_action[-2]
+
+    
+
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
         """Execute one step in the environment"""
         self.step_count += 1
         
+        self.list_action.append(action)
+
         # Get original token
         original_token = self.gen_action.payload_generator.token_to_text(action)
         token_name = self.gen_action.get_token_name(action)
         
-
-        
-
-
         # Check if token should be bypassed
         should_bypass = self.bypass_waf.should_bypass_token(token_name)
         processed_token = original_token
@@ -221,7 +231,7 @@ class SQLiEnvironment:
         # print("Current payload", self.current_payload)
         # print("Final url", final_url)
 
-
+        #print(f"[DEBUG in ENV] reward is {reward}")
         return self.current_state, reward, done, info
     
     def _build_injection_url(self, payload: str) -> str:
@@ -403,31 +413,34 @@ class SQLiEnvironment:
         
         # Enhanced reward for SQL errors
         if "syntax" in content:
-            return -1.0
+            minus = -1.0
         else:
-            #bonus = 0.1
-            return -0.1
+            minus = -0.1
         
             # Reward khi bypass thành công
         if response.get('bypass_applied', False) and not response.get('is_blocked', False):
-            return 0.5
+            bonus = 0.5
         
         # Negative rewards
         if status_code in [403, 406, 429, 501, 503]:
-            return -1.0
+            minus = -1.0
         if self.bypass_waf.is_likely_blocked(status_code, content, response_time):
-            return -0.5
+            minus = -0.5
         if status_code == 0:
-            return -0.3
+            minus = -0.3
         
         # Small positive for different responses
         if self._is_response_different(response):
-            return 0.1
+            bonus += 0.1
         
         if len(payload) > 400:
-            return -0.2
+            minus += -0.2
 
-        return 0.0 + bonus
+        if self.has_adjacent_duplicates():
+            minus += -0.1
+
+        return bonus + minus 
+    
     
     def _detect_sqli_success(self, response: Dict[str, Any]) -> bool:
         """Detect likely SQL injection success"""
