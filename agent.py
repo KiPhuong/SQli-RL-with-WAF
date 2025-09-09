@@ -142,7 +142,7 @@ class SQLiRLAgent:
                 #tokens = ['SPACE' if t == ' ' else t.upper() for t in tokens]
                 tokens = [("SPACE" if re.fullmatch(r"\s+", t) else t.upper())
                     for t in re.findall(
-                    r"--.*?$|#.*?$|'.*?'|\s+|\d+|[A-Za-z_][A-Za-z0-9_]*|[(),]", line,flags=re.MULTILINE)
+                    r"--.*?$|#.*?$|'|\"|\s+|\d+|[A-Za-z_][A-Za-z0-9_]*|[(),]|[^'\sA-Za-z0-9_(),]", line,flags=re.MULTILINE)
                 ]
                 for i in range(len(tokens) - 1):
                     prev_token = tokens[i]
@@ -162,7 +162,7 @@ class SQLiRLAgent:
                 #tokens = re.findall(r"\s+|,|[^\s,]+,--|#|'.*?'|\w+|\d+|[(),]", line.rstrip('\n'))
                 tokens = [("SPACE" if re.fullmatch(r"\s+", t) else t.upper())
                     for t in re.findall(
-                    r"--.*?$|#.*?$|'.*?'|\s+|\d+|[A-Za-z_][A-Za-z0-9_]*|[(),]", line,flags=re.MULTILINE)
+                    r"--.*?$|#.*?$|'|\"|\s+|\d+|[A-Za-z_][A-Za-z0-9_]*|[(),]|[^'\sA-Za-z0-9_(),]", line,flags=re.MULTILINE)
                 ]
                 # Bỏ qua token là dấu cách
                 #tokens = [t.upper() for t in tokens if t != ' ']

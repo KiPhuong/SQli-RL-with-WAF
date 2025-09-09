@@ -80,13 +80,6 @@ class SQLiEnvironment:
         return self.current_state
     
 
-    def has_adjacent_duplicates(self) -> bool:
-        """
-        Kiểm tra xem trong list_action có 2 action liên tiếp trùng nhau không.
-        """
-        if len(self.list_action) < 2:
-            return False
-        return self.list_action[-1] == self.list_action[-2]
 
     
 
@@ -233,6 +226,15 @@ class SQLiEnvironment:
 
         #print(f"[DEBUG in ENV] reward is {reward}")
         return self.current_state, reward, done, info
+    
+    
+    def _has_adjacent_duplicates(self) -> bool:
+        """
+        Kiểm tra xem trong list_action có 2 action liên tiếp trùng nhau không.
+        """
+        if len(self.list_action) < 2:
+            return False
+        return self.list_action[-1] == self.list_action[-2]
     
     def _build_injection_url(self, payload: str) -> str:
         """Build final URL by injecting payload with proper SQL syntax"""
@@ -436,7 +438,7 @@ class SQLiEnvironment:
         if len(payload) > 400:
             minus += -0.2
 
-        if self.has_adjacent_duplicates():
+        if self._has_adjacent_duplicates():
             minus += -0.1
 
         return bonus + minus 
