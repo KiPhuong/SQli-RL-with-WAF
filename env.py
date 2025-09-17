@@ -9,10 +9,13 @@ import re
 from typing import Dict, List, Tuple, Any, Optional, Union
 from urllib.parse import urljoin, quote
 import numpy as np
+import sqlglot
+from sqlglot import parse_one, ParseError
 
 from gen_action import GenAction
 from bypass_waf import BypassWAF
 from simple_state import SimpleStateManager
+from sql_prefix_validator import SQLPrefixValidator
 
 
 class SQLiEnvironment:
@@ -34,6 +37,8 @@ class SQLiEnvironment:
         self.gen_action = GenAction()
         self.bypass_waf = BypassWAF(blocked_keywords=blocked_keywords)
         self.state_manager = SimpleStateManager()
+        self.validator = SQLPrefixValidator()
+
 
         # Environment state
         self.current_state = None
@@ -400,6 +405,17 @@ class SQLiEnvironment:
             'table_names': table_matches
         }
     
+    def _classify_error_type(self, content: str) -> str:
+        content_lower = content.lower()
+        if "different number of columns" in content_lower or "unknown column" in content_lower:
+            return "syntax_close"
+        elif "syntax" in content_lower:
+            return "syntax_noise"
+        elif "forbidden" in content_lower or "blocked" in content_lower:
+            return "waf_block"
+        else:
+            return "other"
+    
     def _calculate_reward(self, response: Dict[str, Any], payload: str, error_info: Dict[str, Any]) -> float:
         """Calculate reward based on response"""
         status_code = response.get('status_code', 0)
@@ -407,6 +423,7 @@ class SQLiEnvironment:
         response_time = response.get('response_time', 0)
         
         bonus = 0
+        minus = 0
         # High reward for SQL injection success
         if self._detect_sqli_success(response):
             if re.search(r"flag\{.*?\}|ctf\{.*?\}|root@localhost|version\(|user\(", content, re.I):
@@ -414,31 +431,46 @@ class SQLiEnvironment:
             return 2.0 + bonus
         
         # Enhanced reward for SQL errors
-        if "syntax" in content:
-            minus = -1.0
-        else:
-            minus = -0.1
-        
-            # Reward khi bypass thành công
-        if response.get('bypass_applied', False) and not response.get('is_blocked', False):
-            bonus = 0.5
-        
-        # Negative rewards
-        if status_code in [403, 406, 429, 501, 503]:
-            minus = -1.0
-        if self.bypass_waf.is_likely_blocked(status_code, content, response_time):
-            minus = -0.5
-        if status_code == 0:
-            minus = -0.3
-        
-        # Small positive for different responses
-        if self._is_response_different(response):
+        # err_type = self._classify_error_type(content)
+        # if err_type == "syntax_close":
+        #     minus = -0.1   # nhẹ nhàng
+        #     bonus += 0.2   # khuyến khích vì đi đúng hướng
+        # elif err_type == "syntax_noise":
+        #     minus = -1.0
+
+        if (self.validator.is_potential_prefix(self.current_payload.upper())): 
+            #print("potential -> +0.1")
             bonus += 0.1
+            #print(f"[DEBUG in env] Is_potential: {self.validator.is_potential_prefix(self.current_payload.upper())}")
+            if(self.validator.is_complete_query(self.current_payload)):
+                #print("Is complete -> +0.1")
+                bonus += 0.1
+        else:
+            #print("No potential -> -0.2")
+            minus -= 0.2
+
+            # Reward khi bypass thành công
+        # if response.get('bypass_applied', False) and not response.get('is_blocked', False):
+        #     bonus = 0.5
+        
+        # # Negative rewards
+        # if status_code in [403, 406, 429, 501, 503]:
+        #     minus = -1.0
+        # if self.bypass_waf.is_likely_blocked(status_code, content, response_time):
+        #     minus = -0.5
+        # if status_code == 0:
+        #     minus = -0.3
+        
+        # # Small positive for different responses
+        # if self._is_response_different(response):
+        #     bonus += 0.1
         
         if len(payload) > 400:
+            #print(f"Max payload -> -0.2")
             minus += -0.2
 
         if self._has_adjacent_duplicates():
+            #print(f"Has dup -> -0.1")            
             minus += -0.1
 
         return bonus + minus 

@@ -80,8 +80,8 @@ class SQLiRLAgent:
         print(f"   Input: {state_size} → Hidden: {self.config['hidden_sizes']} → Output: {action_size}")
 
         # Token handling
-        self.start_tokens = ['SPACE', 'UNION'] # Có thể điều chỉnh
-        
+        #self.start_tokens = ['SPACE', 'UNION'] # Có thể điều chỉnh
+        self.start_tokens = ['SPACE']
         self.token_list = self._get_token_list()
         self.token_to_id = {token: idx for idx, token in enumerate(self.token_list)}
         self.id_to_token = {idx: token for idx, token in enumerate(self.token_list)}
@@ -258,9 +258,9 @@ class SQLiRLAgent:
         probs = exp_q / np.sum(exp_q)
 
         action = np.random.choice(len(q_values), p=probs)
-        print(f"[DEBUG in agent] Q-values: \n {q_values}")
-        print(f"[DEBUG in agent] Probs Action: \n {probs}")
-        print(f"[DEBUG in agent] Prev_prev_token: {str(prev_prev_token):<10} || Prve_token: {str(prev_token):<10} || Action selected: {self.id_to_token.get(action)}")
+        # print(f"[DEBUG in agent] Q-values: \n {q_values}")
+        # print(f"[DEBUG in agent] Probs Action: \n {probs}")
+        # print(f"[DEBUG in agent] Prev_prev_token: {str(prev_prev_token):<10} || Prve_token: {str(prev_token):<10} || Action selected: {self.id_to_token.get(action)}")
         return action
 
         # --- helper: compute union of next tokens from a transition table ---
