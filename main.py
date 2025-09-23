@@ -296,7 +296,7 @@ class SQLiRLTrainer:
             # Environment step
             next_state, reward, done, info = self.env.step(action)
 
-            print(f"[DEBUG in main] Reward: {reward}; Final URL {info.get('final_url')}")
+           # print(f"[DEBUG in main] Reward: {reward}; Final URL {info.get('final_url')}")
             #print(f"[DEBUG in main] Current Payload {info.get('payload')}")
             #print(f"Current Payload: {self.env.current_payload}")
             self.payloads.append(self.env.current_payload)

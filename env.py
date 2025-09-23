@@ -465,7 +465,7 @@ class SQLiEnvironment:
         # if self._is_response_different(response):
         #     bonus += 0.1
         
-        if len(payload) > 400:
+        if len(payload) > 400 or len(payload) < 10:
             #print(f"Max payload -> -0.2")
             minus += -0.2
 
@@ -513,7 +513,8 @@ class SQLiEnvironment:
     
     def _is_episode_done(self, response: Dict[str, Any]) -> bool:
         """Determine if episode should end"""
-        has_comment = any(c in self.current_payload for c in ["--"])
+        has_comment = any(c in self.current_payload for c in ["--", "#"])
+        #has_end = any(c in self.current_payload for c in [";"])
         return (self.step_count >= self.max_steps 
                 or self._detect_sqli_success(response) 
                 or len(self.current_payload) >= 500  

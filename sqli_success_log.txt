@@ -1,0 +1,6 @@
+Payload:  AND(((((((((((((NULL))=SLEEP(/////////////////
+Bypass method: None
+Item ID: N/A
+Price: $
+Email (cfemail): 82f8faefc2eeedeeace5edf4
+============================================================
