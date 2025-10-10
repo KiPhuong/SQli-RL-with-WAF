@@ -1,0 +1,26 @@
+?start: query
+
+?query: injection_prefix (union_clause | expression) [comment]
+
+?injection_prefix: SIGNED_NUMBER | "'"
+
+?union_clause: "UNION"i "SELECT"i projection_list ("FROM"i CNAME)?
+
+?projection_list: (expression | "NULL"i) ("," (expression | "NULL"i))*
+
+?expression: SIGNED_NUMBER
+           | "'"
+           | CNAME
+           | function_call
+
+?function_call: CNAME "(" [projection_list] ")"
+
+?comment: "--" /.*/
+        | "#" /.*/
+        | "/*" /.*?/ "*/"
+
+%import common.CNAME
+%import common.SIGNED_NUMBER
+%import common.WS
+%ignore WS
+

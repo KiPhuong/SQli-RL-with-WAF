@@ -83,10 +83,13 @@ class SQLiRLTrainer:
             'target_update_freq': self.config['target_update_freq'],
             'initial_temperature': adjusted_config['initial_temperature'],
             'min_temperature': self.config['min_temperature'],
-            'temperature_decay': adjusted_config['temperature_decay']
+            'temperature_decay': adjusted_config['temperature_decay'],
+            'planner': self.config.get('planner', 'dqn_masked'),
+            'mcts': self.config.get('mcts', {})
         }
-        
+
         self.agent = SQLiRLAgent(state_size, action_size, agent_config)
+        self.agent.set_environment(self.env)
         
         # Training metrics
         self.episode_rewards = []
@@ -249,7 +252,7 @@ class SQLiRLTrainer:
             #print(self.agent.get_q_values(state))
 
             # Agent selects action
-            action = self.agent.select_token(state, step_idx, prev_token, prev_prev_token)
+            action = self.agent.select_token(state, step_idx, prev_token, prev_prev_token, self.env.current_payload)
             #last_actions.append(action)
 
             #Get ID of 2 previous action

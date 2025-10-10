@@ -11,6 +11,7 @@ from urllib.parse import urljoin, quote
 import numpy as np
 import sqlglot
 from sqlglot import parse_one, ParseError
+from lark import Lark, UnexpectedToken
 
 from gen_action import GenAction
 from bypass_waf import BypassWAF
@@ -20,7 +21,7 @@ from sql_prefix_validator import SQLPrefixValidator
 
 class SQLiEnvironment:
     """SQL Injection testing environment for RL agent"""
-    
+
     def __init__(self, target_url: str = "http://localhost:8080/vuln",
                  parameter: str = "id", method: str = "GET",
                  injection_point: str = "1", max_steps: int = 50, timeout: int = 10,
@@ -46,17 +47,50 @@ class SQLiEnvironment:
         self.step_count = 0
         self.episode_history = []
         self.baseline_response = None
-        
+
         # Session for connection reuse
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
-        
+
+        # Initialize Lark grammar parser for reward shaping
+        try:
+            with open('sql_injection_grammar.lark', 'r') as f:
+                grammar = f.read()
+            self.grammar_parser = Lark(grammar, start='start')
+        except Exception as e:
+            print(f"⚠️ Could not load grammar: {e}")
+            self.grammar_parser = None
+
+        # Reward shaping configuration
+        self.reward_weights = {
+            'potential': 0.3,
+            'complete': 0.3,
+            'grammar_progress': 0.3,
+            'novelty': 0.1,
+            'redundancy_penalty': 0.2,
+            'overlength_penalty': 0.1
+        }
+
+        self.milestone_bonuses = {
+            'UNION': 0.15,
+            'SELECT_AFTER_UNION': 0.15,
+            'PROJECTION_COUNT': 0.1,
+            'FROM_PRESENT': 0.1,
+            'COMMENT_CLOSED': 0.1,
+            'SYNTAX_CLOSE': 0.1
+        }
+
+        # Track potential and milestones
+        self.previous_potential = 0.0
+        self.achieved_milestones = set()
+        self.ngram_history = []
+
         # Initialize baseline
         self._establish_baseline()
         self.list_action = []
-    
+
     def _establish_baseline(self):
         """Establish baseline response for comparison"""
         try:
@@ -67,13 +101,16 @@ class SQLiEnvironment:
         except Exception as e:
             print(f"⚠️ Could not establish baseline: {e}")
             self.baseline_response = {'status_code': 200, 'content': '', 'content_length': 0, 'response_time': 1.0}
-    
+
     def reset(self) -> np.ndarray:
         """Reset environment and return initial state"""
         self.step_count = 0
         self.current_payload = ""
         self.episode_history = []
         self.state_manager.reset()
+        self.previous_potential = 0.0
+        self.achieved_milestones = set()
+        self.ngram_history = []
 
         # Build initial state using SimpleStateManager
         self.current_state = self.state_manager.build_state(
@@ -83,21 +120,21 @@ class SQLiEnvironment:
         )
 
         return self.current_state
-    
 
 
-    
+
+
 
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
         """Execute one step in the environment"""
         self.step_count += 1
-        
+
         self.list_action.append(action)
 
         # Get original token
         original_token = self.gen_action.payload_generator.token_to_text(action)
         token_name = self.gen_action.get_token_name(action)
-        
+
         # Check if token should be bypassed
         should_bypass = self.bypass_waf.should_bypass_token(token_name)
         processed_token = original_token
@@ -108,7 +145,7 @@ class SQLiEnvironment:
             for method in self.bypass_waf.get_available_methods():
                 bypass_result = self.bypass_waf.apply_bypass_to_token(original_token, method=method)
                 #print(f"[DEBUG in ENV] Method bypass is {method} and bypass_result is {bypass_result}")
-                
+
                 if bypass_result['success']:
                     processed_token = bypass_result['bypassed']
                     bypass_info = bypass_result
@@ -155,9 +192,9 @@ class SQLiEnvironment:
         # Check if episode is done
         done = self._is_episode_done(response)
 
-        if done: 
+        if done:
             print(f"[DEBUG in env] Final Payload: {self.current_payload}")
-        
+
         # Prepare info
         info = {
             'payload': self.current_payload,
@@ -178,7 +215,7 @@ class SQLiEnvironment:
             'is_complete': len(self.current_payload) >= 500,  # Simple completion check
             'is_full': len(self.current_payload) >= 500
         }
-        
+
         # Store in history
         self.episode_history.append({
             'action': action,
@@ -187,7 +224,7 @@ class SQLiEnvironment:
             'reward': reward,
             'info': info
         })
-        
+
         # if info['sqli_detected']:
         #     with open("sqli_success_log.txt", "a", encoding="utf-8") as f:
         #         f.write(f"Payload: {self.current_payload}\n")
@@ -200,14 +237,14 @@ class SQLiEnvironment:
 
             # Trích xuất Item ID
             item_id_match = re.search(
-                r'<b><u><i>Item ID:</i></u></b>\s*([0-9A-Za-z]+)', 
+                r'<b><u><i>Item ID:</i></u></b>\s*([0-9A-Za-z]+)',
                 content, re.IGNORECASE
             )
             item_id = item_id_match.group(1) if item_id_match else 'N/A'
 
             # Trích xuất Price
             price_match = re.search(
-                r'<b><u><i>Price:</i></u></b>\s*([0-9A-Za-z$]+)', 
+                r'<b><u><i>Price:</i></u></b>\s*([0-9A-Za-z$]+)',
                 content, re.IGNORECASE
             )
             price = price_match.group(1) if price_match else 'N/A'
@@ -224,15 +261,15 @@ class SQLiEnvironment:
                 f.write(f"Email (cfemail): {email_cf}\n")
                 f.write("="*60 + "\n")
 
-        
+
         # print("Action selected: ", token_name)
         # print("Current payload", self.current_payload)
         # print("Final url", final_url)
 
         #print(f"[DEBUG in ENV] reward is {reward}")
         return self.current_state, reward, done, info
-    
-    
+
+
     def _has_adjacent_duplicates(self) -> bool:
         """
         Kiểm tra xem trong list_action có 2 action liên tiếp trùng nhau không.
@@ -240,7 +277,7 @@ class SQLiEnvironment:
         if len(self.list_action) < 2:
             return False
         return self.list_action[-1] == self.list_action[-2]
-    
+
     def _build_injection_url(self, payload: str) -> str:
         """Build final URL by injecting payload with proper SQL syntax"""
         if not payload.strip():
@@ -316,12 +353,12 @@ class SQLiEnvironment:
         # # For numeric injections (default)
         # else:
         #     # Add space for readability
-        
-    
+
+
     def _send_request_to_url(self, url: str) -> Dict[str, Any]:
         """Send HTTP request to URL"""
         start_time = time.time()
-        
+
         try:
             if self.method == "GET":
                 response = self.session.get(url, timeout=self.timeout, allow_redirects=False)
@@ -332,12 +369,12 @@ class SQLiEnvironment:
                     params = urllib.parse.parse_qs(parsed.query)
                     payload_value = params.get(self.parameter, [''])[0]
                     data = {self.parameter: payload_value}
-                    
+
                 else:
                     data = {self.parameter: self.injection_point}
                 print(f"[DEBUG] Sending POST request: {self.target_url} | data={data}")
                 response = self.session.post(self.target_url, data=data, timeout=self.timeout, allow_redirects=False)
-            
+
             response_time = time.time() - start_time
             #print("response content:", response.text)
             return {
@@ -348,7 +385,7 @@ class SQLiEnvironment:
                 'headers': dict(response.headers),
                 'url': response.url
             }
-            
+
         except requests.exceptions.Timeout:
             return {
                 'status_code': 0,
@@ -369,11 +406,11 @@ class SQLiEnvironment:
                 'url': url,
                 'error': str(e)
             }
-    
+
     def _detect_sql_error(self, content: str) -> Dict[str, Any]:
         """Detect SQL error messages and extract information"""
         content_lower = content.lower()
-        
+
         error_patterns = {
             'mysql': ['unknown column', 'mysql_fetch_array', 'mysql_num_rows', 'you have an error in your sql syntax', 'different number of columns'],
             'postgresql': ['postgresql', 'pg_query', 'column does not exist', 'relation does not exist'],
@@ -381,21 +418,21 @@ class SQLiEnvironment:
             'mssql': ['microsoft ole db provider', 'unclosed quotation mark', 'syntax error'],
             'sqlite': ['sqlite', 'no such column', 'no such table']
         }
-        
+
         detected_errors = []
         database_type = 'unknown'
-        
+
         for db_type, patterns in error_patterns.items():
             for pattern in patterns:
                 if pattern in content_lower:
                     detected_errors.append(pattern)
                     database_type = db_type
                     break
-        
+
         # Extract column names
         column_matches = re.findall(r"unknown column ['\"]([^'\"]+)['\"]", content, re.IGNORECASE)
         table_matches = re.findall(r"table ['\"]([^'\"]+)['\"]", content, re.IGNORECASE)
-        
+
         return {
             'has_error': len(detected_errors) > 0,
             'error_count': len(detected_errors),
@@ -404,7 +441,7 @@ class SQLiEnvironment:
             'column_names': column_matches,
             'table_names': table_matches
         }
-    
+
     def _classify_error_type(self, content: str) -> str:
         content_lower = content.lower()
         if "different number of columns" in content_lower or "unknown column" in content_lower:
@@ -415,76 +452,101 @@ class SQLiEnvironment:
             return "waf_block"
         else:
             return "other"
-    
+
+    def _compute_potential(self, payload: str) -> float:
+        """Compute the 'potential' of a payload based on multiple heuristics."""
+        if not payload:
+            return 0.0
+
+        # 1. Validator scores
+        is_potential = self.validator.is_potential_prefix(payload.upper())
+        is_complete = self.validator.is_complete_query(payload)
+
+        # 2. Grammar progress
+        grammar_progress = 0.0
+        if self.grammar_parser:
+            try:
+                self.grammar_parser.parse(payload)
+                grammar_progress = 1.0  # Full parse success
+            except UnexpectedToken as e:
+                # Partial progress based on how much was parsed
+                grammar_progress = e.pos / len(payload) if len(payload) > 0 else 0.0
+            except Exception:
+                grammar_progress = 0.0
+
+        # 3. Novelty and Redundancy
+        tokens = payload.split()
+        novelty = 0.0
+        redundancy = 0.0
+        if len(tokens) > 2:
+            trigram = " ".join(tokens[-3:])
+            if trigram not in self.ngram_history:
+                novelty = 1.0
+                self.ngram_history.append(trigram)
+            else:
+                redundancy = 1.0
+
+        # 4. Overlength penalty
+        overlength = max(0, (len(payload) - 400) / 100)
+
+        # Weighted sum of potentials
+        potential = (
+            is_potential * self.reward_weights['potential'] +
+            is_complete * self.reward_weights['complete'] +
+            grammar_progress * self.reward_weights['grammar_progress'] +
+            novelty * self.reward_weights['novelty'] -
+            redundancy * self.reward_weights['redundancy_penalty'] -
+            overlength * self.reward_weights['overlength_penalty']
+        )
+        return potential
+
     def _calculate_reward(self, response: Dict[str, Any], payload: str, error_info: Dict[str, Any]) -> float:
-        """Calculate reward based on response"""
-        status_code = response.get('status_code', 0)
-        content = response.get('content', '')
-        response_time = response.get('response_time', 0)
-        
-        bonus = 0
-        minus = 0
-        # High reward for SQL injection success
+        """Calculate reward based on delta potential and milestone bonuses."""
+        # High reward for definitive success
         if self._detect_sqli_success(response):
-            if re.search(r"flag\{.*?\}|ctf\{.*?\}|root@localhost|version\(|user\(", content, re.I):
-                bonus = 1.0
-            return 2.0 + bonus
-        
-        # Enhanced reward for SQL errors
-        # err_type = self._classify_error_type(content)
-        # if err_type == "syntax_close":
-        #     minus = -0.1   # nhẹ nhàng
-        #     bonus += 0.2   # khuyến khích vì đi đúng hướng
-        # elif err_type == "syntax_noise":
-        #     minus = -1.0
+            return 5.0
 
-        if (self.validator.is_potential_prefix(self.current_payload.upper())): 
-            #print("potential -> +0.1")
-            bonus += 0.1
-            #print(f"[DEBUG in env] Is_potential: {self.validator.is_potential_prefix(self.current_payload.upper())}")
-            if(self.validator.is_complete_query(self.current_payload)):
-                #print("Is complete -> +0.1")
-                bonus += 0.1
-        else:
-            #print("No potential -> -0.2")
-            minus -= 0.2
+        # 1. Delta Potential Reward
+        current_potential = self._compute_potential(payload)
+        delta_potential = current_potential - self.previous_potential
+        self.previous_potential = current_potential
 
-            # Reward khi bypass thành công
-        # if response.get('bypass_applied', False) and not response.get('is_blocked', False):
-        #     bonus = 0.5
-        
-        # # Negative rewards
-        # if status_code in [403, 406, 429, 501, 503]:
-        #     minus = -1.0
-        # if self.bypass_waf.is_likely_blocked(status_code, content, response_time):
-        #     minus = -0.5
-        # if status_code == 0:
-        #     minus = -0.3
-        
-        # # Small positive for different responses
-        # if self._is_response_different(response):
-        #     bonus += 0.1
-        
-        if len(payload) > 400 or len(payload) < 10:
-            #print(f"Max payload -> -0.2")
-            minus += -0.2
+        # 2. Milestone Bonus Reward
+        milestone_bonus = 0.0
+        payload_upper = payload.upper()
+        for milestone, bonus in self.milestone_bonuses.items():
+            if milestone not in self.achieved_milestones:
+                if milestone == 'SELECT_AFTER_UNION' and 'UNION' in self.achieved_milestones and 'SELECT' in payload_upper:
+                    milestone_bonus += bonus
+                    self.achieved_milestones.add(milestone)
+                elif milestone == 'SYNTAX_CLOSE' and self._classify_error_type(response['content']) == 'syntax_close':
+                    milestone_bonus += bonus
+                    self.achieved_milestones.add(milestone)
+                elif milestone in payload_upper:
+                    milestone_bonus += bonus
+                    self.achieved_milestones.add(milestone)
 
-        if self._has_adjacent_duplicates():
-            #print(f"Has dup -> -0.1")            
-            minus += -0.1
+        # 3. HTTP-based Penalties (reduced impact)
+        http_penalty = 0.0
+        status_code = response.get('status_code', 0)
+        if status_code in [403, 406, 429, 501, 503] or self.bypass_waf.is_likely_blocked(status_code, response['content'], response['response_time']):
+            http_penalty = -0.2  # Penalty for being blocked
+        elif status_code == 0: # Timeout or connection error
+            http_penalty = -0.1
 
-        return bonus + minus 
-    
-    
+        final_reward = delta_potential + milestone_bonus + http_penalty
+        return final_reward
+
+
     def _detect_sqli_success(self, response: Dict[str, Any]) -> bool:
         """Detect likely SQL injection success"""
         content = response.get('content', '').lower()
         response_time = response.get('response_time', 0)
-        
+
         # Time-based detection
         if response_time > 4.5:
             return True
-        
+
         # Extract data
         success_patterns = [
             r"zixem@localhost$", r"8.0.36",
@@ -498,28 +560,28 @@ class SQLiEnvironment:
                 return True
 
         return False
-    
+
     def _is_response_different(self, response: Dict[str, Any]) -> bool:
         """Check if response differs from baseline"""
         if not self.baseline_response:
             return False
-        
+
         status_diff = response.get('status_code', 0) != self.baseline_response.get('status_code', 0)
         baseline_length = self.baseline_response.get('content_length', 0)
         current_length = response.get('content_length', 0)
         length_diff = baseline_length > 0 and abs(current_length - baseline_length) > baseline_length * 0.1
-        
+
         return status_diff or length_diff
-    
+
     def _is_episode_done(self, response: Dict[str, Any]) -> bool:
         """Determine if episode should end"""
         has_comment = any(c in self.current_payload for c in ["--", "#"])
         #has_end = any(c in self.current_payload for c in [";"])
-        return (self.step_count >= self.max_steps 
-                or self._detect_sqli_success(response) 
-                or len(self.current_payload) >= 500  
+        return (self.step_count >= self.max_steps
+                or self._detect_sqli_success(response)
+                or len(self.current_payload) >= 500
                 or has_comment)
-    
+
     def get_state_size(self) -> int:
         """Get state size"""
         return self.state_manager.get_state_size()
@@ -527,16 +589,16 @@ class SQLiEnvironment:
     def get_action_size(self) -> int:
         """Get action space size"""
         return self.gen_action.get_vocab_size()
-    
+
     def get_episode_summary(self) -> Dict[str, Any]:
         """Get summary of current episode"""
         if not self.episode_history:
             return {}
-        
+
         total_reward = sum(step['reward'] for step in self.episode_history)
         sqli_detected = any(step['info']['sqli_detected'] for step in self.episode_history)
         errors_detected = sum(1 for step in self.episode_history if step['info']['error_detected'])
-        
+
         return {
             'total_steps': len(self.episode_history),
             'total_reward': total_reward,

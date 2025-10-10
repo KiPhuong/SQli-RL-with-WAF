@@ -38,101 +38,101 @@ Examples:
   python run_sqli_rl.py --url "https://example.com/vuln.php" --episodes 1000 --no-debug
         """
     )
-    
+
     # Required arguments
     parser.add_argument(
-        '--url', 
+        '--url',
         required=True,
         help='Target URL (base URL without parameters for GET, full URL for POST)'
     )
-    
+
     parser.add_argument(
-        '--param', 
+        '--param',
         default='id',
         help='Parameter name to inject into (default: id)'
     )
-    
+
     # Optional arguments
     parser.add_argument(
-        '--injection-point', 
+        '--injection-point',
         default='-1',
         help='Base value to inject after (default: -1). Final URL will be: url?param=injection_point+payload'
     )
-    
+
     parser.add_argument(
-        '--method', 
+        '--method',
         choices=['GET', 'POST'],
         default='GET',
         help='HTTP method (default: GET)'
     )
-    
+
     parser.add_argument(
-        '--episodes', 
+        '--episodes',
         type=int,
         default=100,
         help='Number of training episodes (default: 100)'
     )
-    
+
     parser.add_argument(
-        '--max-steps', 
+        '--max-steps',
         type=int,
         default=50,
         help='Maximum steps per episode (default: 50)'
     )
-    
+
     parser.add_argument(
-        '--learning-rate', 
+        '--learning-rate',
         type=float,
         default=0.001,
         help='Learning rate for DQN (default: 0.001)'
     )
-    
+
     parser.add_argument(
-        '--temperature', 
+        '--temperature',
         type=float,
         default=2.0,
         help='Initial temperature for Boltzmann exploration (default: 2.0)'
     )
-    
+
     parser.add_argument(
-        '--debug', 
+        '--debug',
         action='store_true',
         help='Enable debug mode with detailed output'
     )
-    
+
     parser.add_argument(
-        '--no-debug', 
+        '--no-debug',
         action='store_true',
         help='Disable debug mode (overrides --debug)'
     )
-    
+
     parser.add_argument(
-        '--debug-freq', 
+        '--debug-freq',
         type=int,
         default=1,
         help='Debug output frequency (every N steps, default: 1)'
     )
-    
+
     parser.add_argument(
-        '--save-freq', 
+        '--save-freq',
         type=int,
         default=100,
         help='Model save frequency (every N episodes, default: 100)'
     )
-    
+
     parser.add_argument(
-        '--log-freq', 
+        '--log-freq',
         type=int,
         default=10,
         help='Log output frequency (every N episodes, default: 10)'
     )
-    
+
     parser.add_argument(
-        '--model-path', 
+        '--model-path',
         default='models/',
         help='Directory to save models (default: models/)'
     )
-    
+
     parser.add_argument(
         '--log-path',
         default='logs/',
@@ -155,7 +155,13 @@ Examples:
         '--retrain-model',
         type=str,
         help='Path to model file to resume training from (optional)'
-    )    
+    )
+    parser.add_argument(
+        '--planner',
+        choices=['dqn_masked', 'mcts_lark'],
+        default='dqn_masked',
+        help='Action selection planner to use (default: dqn_masked)'
+    )
 
     return parser.parse_args()
 
@@ -163,10 +169,10 @@ Examples:
 def main():
     """Main function"""
     args = parse_arguments()
-    
+
     # Determine debug mode
     debug_mode = args.debug and not args.no_debug
-    
+
     # Determine blocked keywords source
     blocked_keywords = None
     if args.blocked_keywords_file:
@@ -198,8 +204,9 @@ def main():
         'log_save_path': args.log_path,
         'blocked_keywords': blocked_keywords,
         'retrain_model': args.retrain_model,
+        'planner': args.planner,
     }
-    
+
     # Display configuration
     print("🚀 SQL Injection RL Agent")
     print("=" * 50)
@@ -210,10 +217,10 @@ def main():
     print(f"Episodes: {args.episodes}")
     print(f"Max Steps: {args.max_steps}")
     print(f"Debug Mode: {'✅ ON' if debug_mode else '❌ OFF'}")
-    
+
     if debug_mode:
         print(f"Debug Frequency: Every {args.debug_freq} step(s)")
-    
+
     print("\n📝 Example Final URLs:")
     if args.method == 'GET':
         print(f"  Empty payload: {args.url}?{args.param}={args.injection_point}")
@@ -221,16 +228,16 @@ def main():
     else:
         print(f"  POST to: {args.url}")
         print(f"  Data: {args.param}={args.injection_point}[payload]")
-    
+
     print("\n" + "=" * 50)
-    
+
     try:
         # Create and run trainer
         trainer = SQLiRLTrainer(config)
         trainer.train()
-        
+
         print("\n✅ Training completed successfully!")
-        
+
     except KeyboardInterrupt:
         print("\n⚠️ Training interrupted by user")
         sys.exit(1)

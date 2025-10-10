@@ -4,6 +4,7 @@ numpy>=1.21.0
 
 # SQL parsing and validation
 sqlglot>=20.0.0
+lark>=1.1.2
 
 # HTTP and networking
 requests>=2.25.0

@@ -8,21 +8,32 @@ from collections import deque
 from typing import List, Tuple, Dict, Any
 from env import SQLiEnvironment
 from gen_action import ActionSpace
+from mcts_selector import MCTSSelector
 import re
 
 class DQN(nn.Module):
-    """Deep Q-Network for token selection"""
+    """Deep Q-Network with separate Policy and Value heads."""
     def __init__(self, state_size: int, action_size: int, hidden_sizes: List[int] = [512, 256, 128]):
         super(DQN, self).__init__()
-        layers = []
+        # Shared body of the network
+        shared_layers = []
         input_size = state_size
         for hidden_size in hidden_sizes:
-            layers.append(nn.Linear(input_size, hidden_size))
-            layers.append(nn.ReLU())
-            layers.append(nn.Dropout(0.2))
+            shared_layers.append(nn.Linear(input_size, hidden_size))
+            shared_layers.append(nn.ReLU())
+            shared_layers.append(nn.Dropout(0.2))
             input_size = hidden_size
-        layers.append(nn.Linear(input_size, action_size))
-        self.network = nn.Sequential(*layers)
+        self.shared_network = nn.Sequential(*shared_layers)
+
+        # Policy head - predicts action probabilities
+        self.policy_head = nn.Sequential(
+            nn.Linear(input_size, action_size),
+            nn.Softmax(dim=-1)
+        )
+
+        # Value head - predicts Q-values
+        self.value_head = nn.Linear(input_size, action_size)
+
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
@@ -31,7 +42,10 @@ class DQN(nn.Module):
             module.bias.data.fill_(0.01)
 
     def forward(self, x):
-        return self.network(x)
+        shared_features = self.shared_network(x)
+        policy = self.policy_head(shared_features)
+        value = self.value_head(shared_features)
+        return policy, value
 
 
 class BoltzmannExploration:
@@ -72,7 +86,15 @@ class SQLiRLAgent:
             'hidden_sizes': self._calculate_hidden_sizes(state_size, action_size),
             'initial_temperature': 2.0,
             'min_temperature': 0.1,
-            'temperature_decay': 0.9999
+            'temperature_decay': 0.9999,
+            'planner': 'dqn_masked',  # 'dqn_masked' or 'mcts_lark'
+            'policy_loss_weight': 0.1,
+            'mcts': {
+                'num_simulations': 100,
+                'max_depth': 8,
+                'c_puct': 1.5,
+                'top_k_real': 1
+            }
         }
         self.config = {**default_config, **(config or {})}
 
@@ -114,7 +136,35 @@ class SQLiRLAgent:
         self.memory = deque(maxlen=self.config['memory_size'])
         self.step_count = 0
         self.update_target_network()
+        self.last_policy_target = None  # To store policy from MCTS
 
+        # Initialize MCTS selector if configured
+        self.mcts_selector = None
+        if self.config.get('planner') == 'mcts_lark':
+            try:
+                # We'll need to pass the environment's evaluator function
+                # For now, we'll initialize it as None and set it later
+                self.mcts_selector = None  # Will be set in set_environment method
+                print("   MCTS Planner enabled")
+            except Exception as e:
+                print(f"⚠️ Could not initialize MCTS: {e}")
+                print("   Falling back to DQN masked planner")
+
+    def set_environment(self, env):
+        """Set the environment reference for MCTS evaluation."""
+        self.env = env
+        if self.config.get('planner') == 'mcts_lark' and env.grammar_parser:
+            try:
+                self.mcts_selector = MCTSSelector(
+                    config=self.config,
+                    grammar_parser=env.grammar_parser,
+                    action_space=self.token_list,
+                    env_evaluator=env._compute_potential
+                )
+                print("✅ MCTS Selector initialized successfully")
+            except Exception as e:
+                print(f"⚠️ Could not initialize MCTS: {e}")
+                self.mcts_selector = None
 
     def _calculate_hidden_sizes(self, state_size: int, action_size: int) -> List[int]:
         if action_size <= 100:
@@ -214,11 +264,42 @@ class SQLiRLAgent:
 
     #     return action
 
-    def select_token(self, state: np.ndarray, step_idx: int = 0, prev_token: str = None, prev_prev_token: str = None) -> int:
+    def select_token(self, state: np.ndarray, step_idx: int = 0, prev_token: str = None, prev_prev_token: str = None, current_payload: str = "") -> int:
+        # If MCTS planner is enabled, use it
+        if self.config.get('planner') == 'mcts_lark' and self.mcts_selector:
+            # 1. Get Q-values from DQN to use as policy priors
+            q_values = self.get_q_values(state)
+
+            # 2. Get a mask of allowed actions to ensure priors are valid
+            allowed_ids = self._get_allowed_ids(step_idx, prev_token, prev_prev_token)
+            mask_bool = np.zeros(self.action_size, dtype=bool)
+            mask_bool[list(allowed_ids)] = True
+
+            # 3. Convert Q-values to probabilities (softmax) to guide MCTS
+            probabilities = self._masked_softmax(q_values, mask_bool)
+            policy_priors = {self.id_to_token[i]: prob for i, prob in enumerate(probabilities) if prob > 0}
+
+            # 4. Run MCTS search with DQN guidance
+            best_action_token, policy_target = self.mcts_selector.select_action(
+                initial_payload=current_payload,
+                policy_priors=policy_priors
+            )
+            action_id = self.token_to_id.get(best_action_token, -1)
+
+            # Store policy target for later use in training
+            self.last_policy_target = policy_target
+            if action_id != -1:
+                return action_id
+            else:
+                # Fallback if token from MCTS is not in our vocab (should be rare)
+                print(f"[WARN] MCTS selected token '{best_action_token}' not in vocab. Falling back to DQN.")
+
+        # Fallback to original DQN masked softmax logic
         self.q_network.eval()
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
-            q_values = self.q_network(state_tensor).cpu().numpy()[0]
+            _, q_values = self.q_network(state_tensor)
+            q_values = q_values.cpu().numpy()[0]
 
         mask = np.zeros_like(q_values)
 
@@ -368,16 +449,19 @@ class SQLiRLAgent:
         self.q_network.eval()
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
-            return self.q_network(state_tensor).cpu().numpy()[0]
+            _, q_values = self.q_network(state_tensor)
+            return q_values.cpu().numpy()[0]
 
     def remember(self, state: np.ndarray, action: int, reward: float, next_state: np.ndarray, done: bool):
-        self.memory.append((state, action, reward, next_state, done))
+        policy_target = self.last_policy_target or {}
+        self.memory.append((state, action, reward, next_state, done, policy_target))
+        self.last_policy_target = None  # Reset after use
 
     def replay(self):
         if len(self.memory) < self.config['batch_size']:
             return
         batch = random.sample(self.memory, self.config['batch_size'])
-        states, actions, rewards, next_states, dones = zip(*batch)
+        states, actions, rewards, next_states, dones, policy_targets = zip(*batch)
 
         states = torch.FloatTensor(np.array(states))
         actions = torch.LongTensor(actions)
@@ -385,11 +469,37 @@ class SQLiRLAgent:
         next_states = torch.FloatTensor(np.array(next_states))
         dones = torch.BoolTensor(dones)
 
-        current_q_values = self.q_network(states).gather(1, actions.unsqueeze(1))
-        next_q_values = self.target_network(next_states).max(1)[0].detach()
+        # Convert policy targets (dicts) to a dense tensor
+        policy_target_tensor = torch.zeros(self.config['batch_size'], self.action_size)
+        for i, target_dict in enumerate(policy_targets):
+            if target_dict: # MCTS might not return targets if no children
+                for token, prob in target_dict.items():
+                    if token in self.token_to_id:
+                        policy_target_tensor[i, self.token_to_id[token]] = prob
+
+        # Get current policy and value predictions
+        current_policy_preds, current_q_values_all = self.q_network(states)
+        current_q_values = current_q_values_all.gather(1, actions.unsqueeze(1))
+
+        # Get target Q-values
+        _, next_q_values_all = self.target_network(next_states)
+        next_q_values = next_q_values_all.max(1)[0].detach()
         target_q_values = rewards + (self.config['gamma'] * next_q_values * ~dones)
 
-        loss = nn.MSELoss()(current_q_values.squeeze(), target_q_values)
+        # 1. Value Loss (MSE)
+        value_loss = nn.MSELoss()(current_q_values.squeeze(), target_q_values)
+
+        # 2. Policy Loss (Cross-Entropy)
+        # We only calculate policy loss for samples that came from MCTS
+        mcts_samples_mask = [bool(p) for p in policy_targets]
+        if any(mcts_samples_mask):
+            policy_loss = nn.CrossEntropyLoss()(current_policy_preds[mcts_samples_mask], policy_target_tensor[mcts_samples_mask])
+        else:
+            policy_loss = torch.tensor(0.0) # No MCTS samples in this batch
+
+        # 3. Combined Loss
+        loss = value_loss + self.config.get('policy_loss_weight', 0.1) * policy_loss
+
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), 1.0)
