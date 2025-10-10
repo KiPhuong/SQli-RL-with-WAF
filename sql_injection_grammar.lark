@@ -1,26 +1,61 @@
 ?start: query
 
-?query: injection_prefix (union_clause | expression) [comment]
+?query: statement (("UNION"i | "AND"i | "OR"i | ";") statement)*
 
-?injection_prefix: SIGNED_NUMBER | "'"
+?statement: select_statement | expression
 
-?union_clause: "UNION"i "SELECT"i projection_list ("FROM"i CNAME)?
+// Core SELECT statement
+?select_statement: "SELECT"i projection_list [from_clause] [where_clause] [limit_clause]
 
-?projection_list: (expression | "NULL"i) ("," (expression | "NULL"i))*
+?projection_list: (expression | "*" | "NULL"i) ("," (expression | "*" | "NULL"i))*
 
-?expression: SIGNED_NUMBER
-           | "'"
-           | CNAME
+?from_clause: "FROM"i table_reference
+?table_reference: CNAME
+
+?where_clause: "WHERE"i boolean_expression
+
+?limit_clause: "LIMIT"i SIGNED_NUMBER [("," | "OFFSET"i) SIGNED_NUMBER]
+
+// Expressions
+?expression: comparison_expression
            | function_call
+           | literal
+           | subquery
+           | CNAME
 
+?boolean_expression: expression (comp_operator expression | "IS"i "NULL"i)
+                   | boolean_expression ("AND"i | "OR"i) boolean_expression
+
+?comparison_expression: expression comp_operator expression
+
+?subquery: "(" select_statement ")"
+
+// Literals
+?literal: SIGNED_NUMBER
+        | string_literal
+        | hex_literal
+
+?string_literal: "'" /[^']*/ "'"
+                | "\"" /[^"]*/ "\""
+
+?hex_literal: /0x[0-9a-fA-F]+/
+
+// Functions
 ?function_call: CNAME "(" [projection_list] ")"
+               | "CAST"i "(" expression "AS"i CNAME ")"
+               | "IF"i "(" boolean_expression "," expression "," expression ")"
+               | "SLEEP"i "(" SIGNED_NUMBER ")"
+               | "BENCHMARK"i "(" SIGNED_NUMBER "," expression ")"
 
-?comment: "--" /.*/
-        | "#" /.*/
-        | "/*" /.*?/ "*/"
+// Operators and Comments
+?comp_operator: "=" | "!=" | "<>" | ">" | ">=" | "<" | "<=" | "LIKE"i | "IN"i
 
+?comment: "--" /[\s\S]*/
+        | "#" /[\s\S]*/
+        | "/*" /[\s\S]*/ "*/"
+
+// Imports and Config
 %import common.CNAME
 %import common.SIGNED_NUMBER
 %import common.WS
 %ignore WS
-
